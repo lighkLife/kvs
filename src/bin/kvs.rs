@@ -1,37 +1,44 @@
 extern crate clap;
 
-use clap::{App, Arg};
+use clap::{App, Arg, SubCommand};
+use std::process::exit;
 
 fn main() {
-    let matches = App::new("kvs")
-        .version("0.1.0")
-        .author("lighk")
-        .about("key value storage")
-        .arg(
-            Arg::with_name("V")
-                .help("Show the version of kvs.")
+    let matches = App::new(env!("CARGO_PKG_NAME"))
+        .version(env!("CARGO_PKG_VERSION"))
+        .author(env!("CARGO_PKG_AUTHORS"))
+        .about(env!("CARGO_PKG_DESCRIPTION"))
+        .subcommand(
+            SubCommand::with_name("set")
+                .arg(Arg::with_name("KEY"))
+                .arg(Arg::with_name("VALUE"))
+                .help("save key value pair to kvs.")
         )
-        .arg(
-            Arg::with_name("get")
-                .value_name("key")
-                .help("Get the value")
-                .takes_value(true)
+        .subcommand(
+            SubCommand::with_name("get")
+                .arg(Arg::with_name("KEY"))
+                .help("Get the value of key.")
         )
-        .arg(
-            Arg::with_name("rm")
-                .value_name("key")
-                .help("remove value")
-                .takes_value(true)
+        .subcommand(
+            SubCommand::with_name("rm")
+                .arg(Arg::with_name("KEY"))
+                .help("Remove the value of key.")
         )
-        .arg(&[
-            Arg::with_name("set")
-                .value_name("key")
-                .takes_value(true),
-            Arg::with_name("set")
-                .value_name("key")
-                .takes_value(true),
-        ]
-        )
-
         .get_matches();
+
+    match matches.subcommand() {
+        ("set", _) => {
+            eprintln!("unimplemented");
+            exit(1);
+        }
+        ("get", _) => {
+            eprintln!("unimplemented");
+            exit(1);
+        }
+        ("rm", _) => {
+            eprintln!("unimplemented");
+            exit(1);
+        }
+        _ => unreachable!(),
+    }
 }

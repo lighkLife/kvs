@@ -1,5 +1,9 @@
+#![deny(missing_docs)]
+
 use std::collections::HashMap;
 
+///
+/// 
 #[derive(Debug)]
 pub struct KvStore {
     storage: HashMap<String, String>,
