@@ -24,18 +24,18 @@ fn main() {
 #[derive(Debug, StructOpt)]
 #[structopt()]
 enum Cmd {
-    #[structopt(about = "Set key to hold the string value.")]
+    #[structopt(about = "Set the value of a string key to a string. Print an error and return a non-zero exit code on failure.")]
     Set {
         key: String,
         value: String,
     },
 
-    #[structopt(about = "Get the value of key.")]
+    #[structopt(about = "Get the string value of a given string key. Print an error and return a non-zero exit code on failure.")]
     Get {
         key: String
     },
 
-    #[structopt(about = "Remove the value of key.")]
+    #[structopt(about = "Remove a given key. Print an error and return a non-zero exit code on failure.")]
     Rm {
         key: String
     },
