@@ -2,10 +2,13 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use crate::{KvsError, Result};
+
+use serde::{Deserialize, Serialize};
+use serde_json::Deserializer;
 
 /// The `KvStore` stores string key-value pairs.
 ///
@@ -56,12 +59,13 @@ impl KvStore {
     }
 
 
-
-
     /// Set the value of a string key to a string.
     /// Return an error if the value is not written successfully.
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         // self.storage.insert(key, value);
+        let command = Command::set(key, value);
+        serde_json::to_writer(&mut self.writer, &command)?;
+        self.writer.flush()?;
         Ok(())
     }
 
@@ -80,13 +84,13 @@ impl KvStore {
     }
 }
 
-fn log_file_name(dir : &Path, log_number:u64) -> PathBuf {
+fn log_file_name(dir: &Path, log_number: u64) -> PathBuf {
     dir.join(format!("{}.log", log_number))
 }
 
-fn read_log_number(path: &PathBuf) ->  Result<Vec<u64>>{
+fn read_log_number(path: &PathBuf) -> Result<Vec<u64>> {
     let log_number_list = fs::read_dir(path)?
-        .flat_map(|res| -> Result<_> {Ok(res?.path())})
+        .flat_map(|res| -> Result<_> { Ok(res?.path()) })
         .filter(|path| path.is_file() && path.extension() == Some("log".as_ref()))
         .flat_map(|path| {
             path.file_name()
@@ -97,4 +101,20 @@ fn read_log_number(path: &PathBuf) ->  Result<Vec<u64>>{
         .flatten()
         .collect();
     Ok(log_number_list)
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+enum Command {
+    Set { key: String, value: String },
+    Remove { key: String },
+}
+
+impl Command {
+    fn set(key: String, value: String) -> Command {
+        Command::Set { key, value }
+    }
+
+    fn remove(key: String) -> Command {
+        Command::remove(key)
+    }
 }

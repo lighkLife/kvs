@@ -8,6 +8,9 @@ pub enum KvsError {
     /// IO error
     #[fail(display = "{}", _0)]
     Io(#[cause] io::Error),
+    /// Serde serialization or deserialization error
+    #[fail(display = "{}", _0)]
+    Serde(#[cause] serde_json::Error),
     /// Unknown command
     #[fail(display = "Unknown command")]
     UnknownCommand,
@@ -17,6 +20,12 @@ pub enum KvsError {
 impl From<io::Error> for KvsError {
     fn from(err: Error) -> KvsError {
         KvsError::Io(err)
+    }
+}
+
+impl From<serde_json::Error> for KvsError {
+    fn from(err: serde_json::Error) -> KvsError {
+        KvsError::Serde(err)
     }
 }
 
