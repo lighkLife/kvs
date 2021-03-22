@@ -1,8 +1,11 @@
 use std::collections::HashMap;
-use std::path::{PathBuf, Path};
-use crate::{KvsError, Result};
+use std::ffi::OsStr;
+use std::fs;
 use std::fs::File;
-use std::io::{BufReader, Seek, Read, Write, BufWriter, SeekFrom};
+use std::io::{BufReader, BufWriter};
+use std::path::{Path, PathBuf};
+
+use crate::{KvsError, Result};
 
 /// The `KvStore` stores string key-value pairs.
 ///
@@ -19,9 +22,9 @@ use std::io::{BufReader, Seek, Read, Write, BufWriter, SeekFrom};
 /// ```
 pub struct KvStore {
     path: PathBuf,
-    reader: BufReaderWithPos<File>,
-    // writer: BufWriterWithPos<File>,
-    log_number: u32,
+    max_log_number: u64,
+    reader_map: HashMap<u64, BufReader<File>>,
+    writer: BufWriter<File>,
 }
 
 impl KvStore {
@@ -31,20 +34,28 @@ impl KvStore {
         let path = path.into();
         std::fs::create_dir_all(&path)?;
 
-        let log_number = 0;
-        let file_name = file + log_number + ".log";
-        let mut file = File::open(Path::new(&file_name))?;
-        let mut buf_reader = BufReader::new(file);
-        // let mut writer = BufReader::new(file);
-        let mut reader = BufReaderWithPos {}
+        let log_number_list = read_log_number(&path)?;
+        let mut reader_map = HashMap::new();
+        for &log_number in &log_number_list {
+            let file = File::open(log_file_name(&path, log_number))?;
+            let mut reader = BufReader::new(file);
+            reader_map.insert(log_number, reader);
+        }
 
-
+        // 开始运行时，打开一个新文件来写入，后面自动合并
+        let mut max_log_number = log_number_list.last().unwrap_or(&0) + 1;
+        let write_file_name = log_file_name(&path, max_log_number);
+        let mut write_file = File::open(Path::new(&write_file_name))?;
+        let mut writer = BufWriter::new(write_file);
         Ok(KvStore {
             path,
-            // writer,
-            log_number,
+            max_log_number,
+            reader_map,
+            writer,
         })
     }
+
+
 
 
     /// Set the value of a string key to a string.
@@ -69,22 +80,21 @@ impl KvStore {
     }
 }
 
-struct BufReaderWithPos<R: Read + Seek> {
-    reader: BufReader<R>,
-    pos: u64,
+fn log_file_name(dir : &Path, log_number:u64) -> PathBuf {
+    dir.join(format!("{}.log", log_number))
 }
 
-impl<R: Read + Seek> BufReaderWithPos<R> {
-    fn new(mut inner: R) -> Result<Self> {
-        let pos = inner.seek(SeekFrom::Current(0))?;
-        Ok(BufReaderWithPos {
-            reader: BufReader::new(inner),
-            pos,
+fn read_log_number(path: &PathBuf) ->  Result<Vec<u64>>{
+    let log_number_list = fs::read_dir(path)?
+        .flat_map(|res| -> Result<_> {Ok(res?.path())})
+        .filter(|path| path.is_file() && path.extension() == Some("log".as_ref()))
+        .flat_map(|path| {
+            path.file_name()
+                .and_then(OsStr::to_str)
+                .map(|s| s.trim_end_matches(".log"))
+                .map(str::parse::<u64>)
         })
-    }
-}
-
-struct BufWriterWithPos<W: Write + Seel> {
-    writer: BufWriter<W>,
-    pos: u64,
+        .flatten()
+        .collect();
+    Ok(log_number_list)
 }
