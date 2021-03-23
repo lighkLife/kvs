@@ -48,7 +48,7 @@ impl KvStore {
         // 开始运行时，打开一个新文件来写入，后面自动合并
         let mut max_log_number = log_number_list.last().unwrap_or(&0) + 1;
         let write_file_name = log_file_name(&path, max_log_number);
-        let mut write_file = File::open(Path::new(&write_file_name))?;
+        let mut write_file = File::create(Path::new(&write_file_name))?;
         let mut writer = BufWriter::new(write_file);
         Ok(KvStore {
             path,
