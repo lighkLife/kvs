@@ -1,23 +1,27 @@
 use std::process::exit;
 
 use structopt::StructOpt;
+use kvs::{KvStore, KvsError, Result};
+use std::env::current_dir;
 
-fn main() {
+fn main() -> Result<()>{
     let cmd = Cmd::from_args() as Cmd;
+
     match cmd {
-        Cmd::Set { key: _, value: _ } => {
-            eprintln!("unimplemented");
-            exit(1);
+        Cmd::Set { key, value } => {
+            let mut store = KvStore::open(current_dir()?)?;
+            store.set(key, value)?;
         }
-        Cmd::Get { key: _ } => {
-            eprintln!("unimplemented");
-            exit(1);
+        Cmd::Get { key } => {
+            let mut store = KvStore::open(current_dir()?)?;
+            let value = store.get(key)?;
         }
-        Cmd::Rm { key: _ } => {
-            eprintln!("unimplemented");
-            exit(1);
+        Cmd::Rm { key } => {
+            let mut store = KvStore::open(current_dir()?)?;
+            store.remove(key)?;
         }
     }
+    Ok(())
 }
 
 

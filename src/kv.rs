@@ -115,6 +115,6 @@ impl Command {
     }
 
     fn remove(key: String) -> Command {
-        Command::remove(key)
+        Command::Remove { key }
     }
 }
