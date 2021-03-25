@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use std::ffi::OsStr;
 use std::fs;
-use std::fs::File;
-use std::io::{BufReader, BufWriter, Write};
+use std::fs::{File, OpenOptions};
+use std::io::{BufReader, BufWriter, Write, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use crate::{KvsError, Result};
@@ -25,9 +25,9 @@ use serde_json::Deserializer;
 /// ```
 pub struct KvStore {
     path: PathBuf,
-    max_log_number: u64,
-    reader_map: HashMap<u64, BufReader<File>>,
+    reader: BufReader<File>,
     writer: BufWriter<File>,
+    store: BTreeMap<String, String>,
 }
 
 impl KvStore {
@@ -37,24 +37,24 @@ impl KvStore {
         let path = path.into();
         std::fs::create_dir_all(&path)?;
 
-        let log_number_list = read_log_number(&path)?;
-        let mut reader_map = HashMap::new();
-        for &log_number in &log_number_list {
-            let file = File::open(log_file_name(&path, log_number))?;
-            let mut reader = BufReader::new(file);
-            reader_map.insert(log_number, reader);
-        }
+        let mut store = BTreeMap::new();
 
-        // 开始运行时，打开一个新文件来写入，后面自动合并
-        let mut max_log_number = log_number_list.last().unwrap_or(&0) + 1;
-        let write_file_name = log_file_name(&path, max_log_number);
-        let mut write_file = File::create(Path::new(&write_file_name))?;
-        let mut writer = BufWriter::new(write_file);
+        // 日志文件序号从1开始
+        let log_number_list = read_log_number(&path)?;
+        let max_log_number = log_number_list.last()?;
+        let file_name = log_file_name(&path, *max_log_number);
+        let mut write_options = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(&file_name)?;
+        let mut writer = BufWriter::new(write_options);
+        let mut reader = BufReader::new(File::open(&file_name)?);
         Ok(KvStore {
             path,
-            max_log_number,
-            reader_map,
+            reader,
             writer,
+            store,
         })
     }
 
@@ -62,18 +62,25 @@ impl KvStore {
     /// Set the value of a string key to a string.
     /// Return an error if the value is not written successfully.
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
-        // self.storage.insert(key, value);
-        let command = Command::set(key, value);
-        serde_json::to_writer(&mut self.writer, &command)?;
+        let cmd = Command::set(key, value);
+        serde_json::to_writer(&mut self.writer, &cmd)?;
         self.writer.flush()?;
+        if let Command::Set {key, value} = cmd {
+            self.store.insert(key, value);
+        }
         Ok(())
     }
 
     /// Get the string value of a string key.
     /// If the key does not exist, return None. Return an error if the value is not read successfully.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        // let value = self.storage.get(&key).cloned();
-        Ok(Some("".to_owned()))
+        let mut pos = self.reader.seek(SeekFrom::Start(0))?;
+        let mut stream = Deserializer::from_reader(reader).into_iter::<Command>();
+        if let Some(value) = self.store.get(&key) {
+            Ok(Some(String::from(value)))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Remove a given key.
@@ -102,6 +109,13 @@ fn read_log_number(path: &PathBuf) -> Result<Vec<u64>> {
         .collect();
     Ok(log_number_list)
 }
+
+struct CommandInfo{
+    log_number: u64,
+    pos: u64,
+    length: u64,
+}
+
 
 #[derive(Serialize, Deserialize, Debug)]
 enum Command {

@@ -11,6 +11,9 @@ pub enum KvsError {
     /// Serde serialization or deserialization error
     #[fail(display = "{}", _0)]
     Serde(#[cause] serde_json::Error),
+    /// Remove a not exit key error
+    #[fail(display = "Key not found")]
+    KeyNotFound,
     /// Unknown command
     #[fail(display = "Unknown command")]
     UnknownCommand,

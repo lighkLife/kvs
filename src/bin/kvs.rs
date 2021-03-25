@@ -14,7 +14,11 @@ fn main() -> Result<()>{
         }
         Cmd::Get { key } => {
             let mut store = KvStore::open(current_dir()?)?;
-            let value = store.get(key)?;
+            if let Some(value) = store.get(key) ? {
+                println!("{}",value );
+            } else {
+                println!("Key not found");
+            }
         }
         Cmd::Rm { key } => {
             let mut store = KvStore::open(current_dir()?)?;
