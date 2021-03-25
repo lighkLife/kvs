@@ -9,6 +9,7 @@ use crate::{KvsError, Result};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
+use std::env::current_dir;
 
 /// The `KvStore` stores string key-value pairs.
 ///
@@ -49,9 +50,8 @@ impl KvStore {
             .append(true)
             .open(&file_name)?;
         let mut writer = BufWriter::new(write_options);
-        let mut read_options = OpenOptions::new()
-            .open(&file_name)?;
-        let mut reader = BufReader::new(read_options);
+        let mut read_file = File::open(&file_name)?;
+        let mut reader = BufReader::new(read_file);
         Ok(KvStore {
             path,
             reader,
@@ -76,10 +76,8 @@ impl KvStore {
     /// Get the string value of a string key.
     /// If the key does not exist, return None. Return an error if the value is not read successfully.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        println!("get");
-        let mut read_options = OpenOptions::new()
-            .open("1.log")?;
-        let mut stream = Deserializer::from_reader(read_options)
+        let reader = self.reader.get_mut();
+        let mut stream = Deserializer::from_reader(reader)
             .into_iter::<Command>();
         while let Some(cmd) = stream.next() {
             match cmd? {
