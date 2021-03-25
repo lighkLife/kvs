@@ -2,7 +2,7 @@ use std::collections::{HashMap, BTreeMap};
 use std::ffi::OsStr;
 use std::fs;
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Write, Seek, SeekFrom};
+use std::io::{BufReader, BufWriter, Write, Seek, SeekFrom, Read};
 use std::path::{Path, PathBuf};
 
 use crate::{KvsError, Result};
@@ -41,7 +41,7 @@ impl KvStore {
 
         // 日志文件序号从1开始
         let log_number_list = read_log_number(&path)?;
-        let max_log_number = log_number_list.last()?;
+        let max_log_number = log_number_list.last().unwrap_or(&1);
         let file_name = log_file_name(&path, *max_log_number);
         let mut write_options = OpenOptions::new()
             .create(true)
@@ -49,7 +49,9 @@ impl KvStore {
             .append(true)
             .open(&file_name)?;
         let mut writer = BufWriter::new(write_options);
-        let mut reader = BufReader::new(File::open(&file_name)?);
+        let mut read_options = OpenOptions::new()
+            .open(&file_name)?;
+        let mut reader = BufReader::new(read_options);
         Ok(KvStore {
             path,
             reader,
@@ -63,7 +65,7 @@ impl KvStore {
     /// Return an error if the value is not written successfully.
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         let cmd = Command::set(key, value);
-        serde_json::to_writer(&mut self.writer, &cmd)?;
+        serde_json::to_writer( self.writer.by_ref(), &cmd)?;
         self.writer.flush()?;
         if let Command::Set {key, value} = cmd {
             self.store.insert(key, value);
@@ -74,8 +76,21 @@ impl KvStore {
     /// Get the string value of a string key.
     /// If the key does not exist, return None. Return an error if the value is not read successfully.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        let mut pos = self.reader.seek(SeekFrom::Start(0))?;
-        let mut stream = Deserializer::from_reader(reader).into_iter::<Command>();
+        println!("get");
+        let mut read_options = OpenOptions::new()
+            .open("1.log")?;
+        let mut stream = Deserializer::from_reader(read_options)
+            .into_iter::<Command>();
+        while let Some(cmd) = stream.next() {
+            match cmd? {
+                Command::Set { key, value } => {
+                    self.store.insert(key, value);
+                }
+                Command::Remove { key } => {
+                    self.store.remove(&key);
+                }
+            }
+        }
         if let Some(value) = self.store.get(&key) {
             Ok(Some(String::from(value)))
         } else {
