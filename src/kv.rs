@@ -52,6 +52,8 @@ impl KvStore {
         let mut writer = BufWriter::new(write_options);
         let mut read_file = File::open(&file_name)?;
         let mut reader = BufReader::new(read_file);
+
+        load_log(&mut reader, &mut store);
         Ok(KvStore {
             path,
             reader,
@@ -76,19 +78,6 @@ impl KvStore {
     /// Get the string value of a string key.
     /// If the key does not exist, return None. Return an error if the value is not read successfully.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        let reader = self.reader.get_mut();
-        let mut stream = Deserializer::from_reader(reader)
-            .into_iter::<Command>();
-        while let Some(cmd) = stream.next() {
-            match cmd? {
-                Command::Set { key, value } => {
-                    self.store.insert(key, value);
-                }
-                Command::Remove { key } => {
-                    self.store.remove(&key);
-                }
-            }
-        }
         if let Some(value) = self.store.get(&key) {
             Ok(Some(String::from(value)))
         } else {
@@ -99,8 +88,17 @@ impl KvStore {
     /// Remove a given key.
     /// Return an error if the key does not exist or is not removed successfully.
     pub fn remove(&mut self, key: String) -> Result<()> {
-        // self.storage.remove(&key);
-        Ok(())
+        if self.store.contains_key(&key){
+            let cmd = Command::remove(key);
+            serde_json::to_writer(self.writer.by_ref(), &cmd)?;
+            self.writer.flush()?;
+            if let Command::Remove { key } = cmd {
+                self.store.remove(&key);
+            }
+            Ok(())
+        } else {
+            Err(KvsError::KeyNotFound)
+        }
     }
 }
 
@@ -121,6 +119,23 @@ fn read_log_number(path: &PathBuf) -> Result<Vec<u64>> {
         .flatten()
         .collect();
     Ok(log_number_list)
+}
+
+fn load_log(reader: &mut BufReader<File>, store: &mut BTreeMap<String,String>) -> Result<()> {
+    let reader = reader.get_mut();
+    let mut stream = Deserializer::from_reader(reader)
+        .into_iter::<Command>();
+    while let Some(cmd) = stream.next() {
+        match cmd? {
+            Command::Set { key, value } => {
+                store.insert(key, value);
+            }
+            Command::Remove { key } => {
+                store.remove(&key);
+            }
+        }
+    }
+    Ok(())
 }
 
 struct CommandInfo{

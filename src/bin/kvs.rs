@@ -4,7 +4,7 @@ use structopt::StructOpt;
 use kvs::{KvStore, KvsError, Result};
 use std::env::current_dir;
 
-fn main() -> Result<()>{
+fn main() -> Result<()> {
     let cmd = Cmd::from_args() as Cmd;
 
     match cmd {
@@ -15,15 +15,22 @@ fn main() -> Result<()>{
         Cmd::Get { key } => {
             let mut store = KvStore::open(current_dir()?)?;
             store.get("key".to_owned());
-            if let Some(value) = store.get(key) ? {
-                println!("{}",value );
+            if let Some(value) = store.get(key)? {
+                println!("{}", value);
             } else {
                 println!("Key not found");
             }
         }
         Cmd::Rm { key } => {
             let mut store = KvStore::open(current_dir()?)?;
-            store.remove(key)?;
+            match store.remove(key) {
+                Ok(()) => {}
+                Err(KvsError::KeyNotFound) => {
+                    println!("Key not found");
+                    exit(1);
+                }
+                Err(e) => return Err(e),
+            }
         }
     }
     Ok(())
