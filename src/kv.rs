@@ -1,6 +1,6 @@
 use std::collections::{HashMap, BTreeMap};
 use std::ffi::OsStr;
-use std::fs;
+use std::{fs, io};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write, Seek, SeekFrom, Read};
 use std::path::{Path, PathBuf};
@@ -25,10 +25,11 @@ use std::env::current_dir;
 /// assert_eq!(kvs.get("key".to_owned()), None);
 /// ```
 pub struct KvStore {
+    max_log_number: u64,
     path: PathBuf,
-    reader: BufReader<File>,
-    writer: BufWriter<File>,
-    store: BTreeMap<String, String>,
+    readers: HashMap<u64, KvsBufReader<File>>,
+    writer: KvsBufWriter<File>,
+    index: BTreeMap<String, CommandInfo>,
 }
 
 impl KvStore {
@@ -37,28 +38,35 @@ impl KvStore {
     pub fn open(path: impl Into<PathBuf>) -> Result<KvStore> {
         let path = path.into();
         std::fs::create_dir_all(&path)?;
-
-        let mut store = BTreeMap::new();
-
-        // 日志文件序号从1开始
+        let mut index = BTreeMap::new();
         let log_number_list = read_log_number(&path)?;
-        let max_log_number = log_number_list.last().unwrap_or(&1);
-        let file_name = log_file_name(&path, *max_log_number);
-        let mut write_options = OpenOptions::new()
+
+        // 每次打开一个新的文件来写日志
+        let max_log_number = log_number_list.last().unwrap_or(&0) + 1;
+        // init writer
+        let file_name = log_file_name(&path, max_log_number);
+        let mut writer = KvsBufWriter::new(OpenOptions::new()
             .create(true)
             .write(true)
             .append(true)
-            .open(&file_name)?;
-        let mut writer = BufWriter::new(write_options);
-        let mut read_file = File::open(&file_name)?;
-        let mut reader = BufReader::new(read_file);
+            .open(&file_name)?)?;
 
-        load_log(&mut reader, &mut store);
+        // init reader
+        let mut readers = HashMap::new();
+        readers.insert(max_log_number, KvsBufReader::new(File::open(file_name)?)?);
+        for &log_number in &log_number_list {
+            let path = log_file_name(&path, log_number);
+            let mut reader = KvsBufReader::new(File::open(path)?)?;
+            load_log(log_number, &mut reader, &mut index);
+            readers.insert(log_number, reader);
+        }
+
         Ok(KvStore {
+            max_log_number,
             path,
-            reader,
+            readers,
             writer,
-            store,
+            index,
         })
     }
 
@@ -66,11 +74,14 @@ impl KvStore {
     /// Set the value of a string key to a string.
     /// Return an error if the value is not written successfully.
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
+        let start_pos = self.writer.pos;
         let cmd = Command::set(key, value);
-        serde_json::to_writer( self.writer.by_ref(), &cmd)?;
+        serde_json::to_writer(self.writer.by_ref(), &cmd)?;
         self.writer.flush()?;
-        if let Command::Set {key, value} = cmd {
-            self.store.insert(key, value);
+        if let Command::Set { key, value } = cmd {
+            let current_pos = self.writer.pos;
+            let info = CommandInfo::new(self.max_log_number, start_pos, current_pos);
+            self.index.insert(key, info);
         }
         Ok(())
     }
@@ -78,8 +89,16 @@ impl KvStore {
     /// Get the string value of a string key.
     /// If the key does not exist, return None. Return an error if the value is not read successfully.
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
-        if let Some(value) = self.store.get(&key) {
-            Ok(Some(String::from(value)))
+        if let Some(cmd_info) = self.index.get(&key) {
+            let reader = self.readers.get_mut(&cmd_info.log_number)
+                .expect("reader not found");
+            reader.seek(SeekFrom::Start(cmd_info.pos_start))?;
+            let log_reader = reader.take(cmd_info.length);
+            if let Command::Set { value, .. } = serde_json::from_reader(log_reader)? {
+                Ok(Some(value))
+            } else {
+                Err(KvsError::UnknownCommand)
+            }
         } else {
             Ok(None)
         }
@@ -88,12 +107,12 @@ impl KvStore {
     /// Remove a given key.
     /// Return an error if the key does not exist or is not removed successfully.
     pub fn remove(&mut self, key: String) -> Result<()> {
-        if self.store.contains_key(&key){
+        if self.index.contains_key(&key) {
             let cmd = Command::remove(key);
             serde_json::to_writer(self.writer.by_ref(), &cmd)?;
             self.writer.flush()?;
             if let Command::Remove { key } = cmd {
-                self.store.remove(&key);
+                self.index.remove(&key).expect("key not found");
             }
             Ok(())
         } else {
@@ -101,6 +120,7 @@ impl KvStore {
         }
     }
 }
+
 
 fn log_file_name(dir: &Path, log_number: u64) -> PathBuf {
     dir.join(format!("{}.log", log_number))
@@ -121,27 +141,46 @@ fn read_log_number(path: &PathBuf) -> Result<Vec<u64>> {
     Ok(log_number_list)
 }
 
-fn load_log(reader: &mut BufReader<File>, store: &mut BTreeMap<String,String>) -> Result<()> {
-    let reader = reader.get_mut();
+fn load_log(
+    log_number: u64,
+    reader: &mut KvsBufReader<File>,
+    index: &mut BTreeMap<String, CommandInfo>,
+) -> Result<()> {
+    let mut start_pos = reader.seek(SeekFrom::Start(0))?;
+    let reader = reader.reader.get_mut();
     let mut stream = Deserializer::from_reader(reader)
         .into_iter::<Command>();
     while let Some(cmd) = stream.next() {
+        let current_pos = stream.byte_offset() as u64;
         match cmd? {
-            Command::Set { key, value } => {
-                store.insert(key, value);
+            Command::Set { key, .. } => {
+                let info = CommandInfo::new(log_number, start_pos, current_pos);
+                index.insert(key, info);
             }
             Command::Remove { key } => {
-                store.remove(&key);
+                index.remove(&key);
             }
         }
+        start_pos = current_pos;
     }
     Ok(())
 }
 
-struct CommandInfo{
+struct CommandInfo {
     log_number: u64,
-    pos: u64,
+    pos_start: u64,
     length: u64,
+}
+
+impl CommandInfo {
+    fn new(log_number: u64, pos_start: u64, pos_stop: u64) -> CommandInfo {
+        let length = pos_stop - pos_start;
+        CommandInfo {
+            log_number,
+            pos_start,
+            length,
+        }
+    }
 }
 
 
@@ -160,3 +199,70 @@ impl Command {
         Command::Remove { key }
     }
 }
+
+
+struct KvsBufReader<R: Read + Seek> {
+    reader: BufReader<R>,
+    pos: u64,
+}
+
+struct KvsBufWriter<W: Write + Seek> {
+    writer: BufWriter<W>,
+    pos: u64,
+}
+
+impl<R: Read + Seek> KvsBufReader<R> {
+    fn new(mut inner: R) -> Result<Self> {
+        let pos = inner.seek(SeekFrom::Current(0))?;
+        Ok(KvsBufReader {
+            reader: BufReader::new(inner),
+            pos,
+        })
+    }
+}
+
+impl<R: Read + Seek> Read for KvsBufReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let length = self.reader.read(buf)?;
+        self.pos += length as u64;
+        Ok(length)
+    }
+}
+
+impl<R: Read + Seek> Seek for KvsBufReader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.pos = self.reader.seek(pos)?;
+        Ok(self.pos)
+    }
+}
+
+impl<W: Write + Seek> KvsBufWriter<W> {
+    fn new(mut inner: W) -> Result<Self> {
+        let pos = inner.seek(SeekFrom::Current(0))?;
+        Ok(KvsBufWriter {
+            writer: BufWriter::new(inner),
+            pos,
+        })
+    }
+}
+
+impl<W: Write + Seek> Write for KvsBufWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let length = self.writer.write(buf)?;
+        self.pos += length as u64;
+        Ok(length)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.writer.flush()
+    }
+}
+
+impl<W: Write + Seek> Seek for KvsBufWriter<W> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.pos = self.writer.seek(pos)?;
+        Ok(self.pos)
+    }
+}
+
+
