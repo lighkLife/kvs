@@ -14,7 +14,7 @@ fn main() -> Result<()> {
         }
         Cmd::Get { key } => {
             let mut store = KvStore::open(current_dir()?)?;
-            store.get("key".to_owned());
+            store.get("key".to_owned())?;
             if let Some(value) = store.get(key)? {
                 println!("{}", value);
             } else {

@@ -9,8 +9,9 @@ use crate::{KvsError, Result};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
-use std::env::current_dir;
 
+
+const  MERGED_THRESHOLD: u64 = 1024;
 /// The `KvStore` stores string key-value pairs.
 ///
 /// Key-value pairs are stored in a `HashMap` in memory and it will be persisted to disk on the future version.
@@ -25,11 +26,18 @@ use std::env::current_dir;
 /// assert_eq!(kvs.get("key".to_owned()), None);
 /// ```
 pub struct KvStore {
-    max_log_number: u64,
+    // number of active log file
+    active_log_number: u64,
+    // directory of file
     path: PathBuf,
+    // a map of log number to log file reader
     readers: HashMap<u64, KvsBufReader<File>>,
+    // writer of active log file
     writer: KvsBufWriter<File>,
+    // a map of key to command info
     index: BTreeMap<String, CommandInfo>,
+    // the bytes of invalid command in the log file which would be delete during the next log merge.
+    unmerged: u64,
 }
 
 impl KvStore {
@@ -41,32 +49,28 @@ impl KvStore {
         let mut index = BTreeMap::new();
         let log_number_list = read_log_number(&path)?;
 
-        // 每次打开一个新的文件来写日志
-        let max_log_number = log_number_list.last().unwrap_or(&0) + 1;
-        // init writer
-        let file_name = log_file_name(&path, max_log_number);
-        let mut writer = KvsBufWriter::new(OpenOptions::new()
-            .create(true)
-            .write(true)
-            .append(true)
-            .open(&file_name)?)?;
-
         // init reader
+        let mut unmerged = 0;
         let mut readers = HashMap::new();
-        readers.insert(max_log_number, KvsBufReader::new(File::open(file_name)?)?);
         for &log_number in &log_number_list {
             let path = log_file_name(&path, log_number);
             let mut reader = KvsBufReader::new(File::open(path)?)?;
-            load_log(log_number, &mut reader, &mut index);
+            unmerged += load_log(log_number, &mut reader, &mut index)?;
             readers.insert(log_number, reader);
         }
 
+        // 每次打开一个新的文件来写日志
+        let active_log_number = log_number_list.iter().max().unwrap_or(&1) + 0;
+        // init writer
+        let writer = create_log_file(active_log_number, &path, &mut readers)?;
+
         Ok(KvStore {
-            max_log_number,
+            active_log_number,
             path,
             readers,
             writer,
             index,
+            unmerged,
         })
     }
 
@@ -78,10 +82,15 @@ impl KvStore {
         let cmd = Command::set(key, value);
         serde_json::to_writer(self.writer.by_ref(), &cmd)?;
         self.writer.flush()?;
-        if let Command::Set { key, value } = cmd {
+        if let Command::Set { key, .. } = cmd {
             let current_pos = self.writer.pos;
-            let info = CommandInfo::new(self.max_log_number, start_pos, current_pos);
-            self.index.insert(key, info);
+            let info = CommandInfo::new(self.active_log_number, start_pos, current_pos);
+            if let Some(old_cmd_info) = self.index.insert(key, info) {
+                self.unmerged += old_cmd_info.length;
+            }
+        }
+        if self.unmerged > MERGED_THRESHOLD {
+            self.merge() ?;
         }
         Ok(())
     }
@@ -112,13 +121,72 @@ impl KvStore {
             serde_json::to_writer(self.writer.by_ref(), &cmd)?;
             self.writer.flush()?;
             if let Command::Remove { key } = cmd {
-                self.index.remove(&key).expect("key not found");
+                let old_cmd_info = self.index.remove(&key)
+                    .expect("key not found");
+                self.unmerged += old_cmd_info.length;
             }
             Ok(())
         } else {
             Err(KvsError::KeyNotFound)
         }
     }
+
+    /// merge log files to a merged file and delete invalid command
+    fn merge(&mut self) -> Result<()> {
+        // copy valid command to a new log file
+        self.active_log_number += 1;
+        let new_log_number = self.active_log_number;
+        self.active_log_number += 1;
+        self.writer = self.create_log_file(self.active_log_number)?;
+
+        let mut new_writer = self.create_log_file(new_log_number)?;
+
+        let mut start_pos = 0;
+        for cmd_info in &mut self.index.values_mut() {
+            let reader = self.readers.get_mut(&cmd_info.log_number)
+                .expect("reader not found");
+            if reader.pos != cmd_info.pos_start {
+                reader.seek(SeekFrom::Start(cmd_info.pos_start)) ?;
+            }
+            let mut cmd_reader = reader.take(cmd_info.length);
+            let length = io::copy(&mut cmd_reader, &mut new_writer)?;
+            *cmd_info = CommandInfo::new(new_log_number, start_pos, start_pos + length);
+            start_pos += length;
+        }
+        new_writer.flush()?;
+
+        // delete log file which have merged
+        let invalid_log_numbers: Vec<u64> = self.readers.keys()
+            .filter(|&&log_number| log_number < new_log_number)
+            .cloned()
+            .collect();
+        for log_number in invalid_log_numbers {
+            self.readers.remove(&log_number);
+            fs::remove_file(log_file_name(&self.path, log_number)) ?;
+        }
+        Ok(())
+    }
+
+    fn create_log_file(&mut self, log_number: u64) -> Result<KvsBufWriter<File>> {
+        create_log_file(log_number, &self.path, &mut self.readers)
+    }
+}
+
+fn create_log_file(
+    active_log_number: u64,
+    path: &Path,
+    readers: &mut HashMap<u64, KvsBufReader<File>>,
+) -> Result<KvsBufWriter<File>> {
+    let file_name = log_file_name(path, active_log_number);
+    let writer = KvsBufWriter::new(
+        OpenOptions::new()
+            .create(true)
+            .write(true)
+            .append(true)
+            .open(&file_name)?
+    )?;
+    readers.insert(active_log_number, KvsBufReader::new(File::open(&file_name)?)?);
+    Ok(writer)
 }
 
 
@@ -145,25 +213,31 @@ fn load_log(
     log_number: u64,
     reader: &mut KvsBufReader<File>,
     index: &mut BTreeMap<String, CommandInfo>,
-) -> Result<()> {
+) -> Result<u64> {
     let mut start_pos = reader.seek(SeekFrom::Start(0))?;
     let reader = reader.reader.get_mut();
     let mut stream = Deserializer::from_reader(reader)
         .into_iter::<Command>();
+
+    let mut unmerged = 0;
     while let Some(cmd) = stream.next() {
         let current_pos = stream.byte_offset() as u64;
         match cmd? {
             Command::Set { key, .. } => {
                 let info = CommandInfo::new(log_number, start_pos, current_pos);
-                index.insert(key, info);
+                if let Some(old_cmd_info) = index.insert(key, info) {
+                    unmerged += old_cmd_info.length;
+                }
             }
             Command::Remove { key } => {
-                index.remove(&key);
+                if let Some(old_cmd_info) = index.remove(&key) {
+                    unmerged += old_cmd_info.length;
+                }
             }
         }
         start_pos = current_pos;
     }
-    Ok(())
+    Ok(unmerged)
 }
 
 struct CommandInfo {
