@@ -3,7 +3,7 @@ use std::io;
 use std::io::Error;
 
 /// kvs error
-#[derive(Debug, Fail)]
+#[derive(Fail, Debug)]
 pub enum KvsError {
     /// IO error
     #[fail(display = "{}", _0)]
@@ -15,8 +15,8 @@ pub enum KvsError {
     #[fail(display = "Key not found")]
     KeyNotFound,
     /// Server config is invalid error.
-    #[fail(display = "invalid config")]
-    InvalidConfig(msg),
+    #[fail(display = "Server start failed.")]
+    ServerStart,
     /// Unknown command
     #[fail(display = "Unknown command")]
     UnknownCommand,
