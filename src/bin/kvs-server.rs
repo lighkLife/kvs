@@ -1,6 +1,6 @@
 use clap::arg_enum;
 use structopt::StructOpt;
-use std::net::SocketAddr;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::fmt::{Display, Formatter};
 use log::{error, info, warn, debug};
 use log::LevelFilter;
@@ -8,6 +8,7 @@ use std::env::current_dir;
 use kvs::*;
 use std::fs;
 use std::process::exit;
+use std::io::{Read, BufReader, BufWriter, Write};
 
 
 const DEFAULT_ADDR: &str = "127.0.0.1:4000";
@@ -65,12 +66,28 @@ fn main() {
 
             //save engine type.
             fs::write(current_dir()?.join(ENGINE_FILE_NAME), format!("{}", engine))?;
+
+            let listener = TcpListener::bind(opt.addr)?;
+            // accept connections and process them serially
+            for stream in listener.incoming() {
+                handle_client(stream?);
+            }
             Ok(())
         });
     if let Err(e) = result {
         error!("{}", e);
         exit(1);
     }
+}
+
+fn handle_client(stream: TcpStream) {
+    let mut buffer = String::new();
+    let mut reader = BufReader::new(&stream);
+    reader.read_to_string(&mut buffer);
+    debug!("receive: {}", buffer);
+    let mut writer = BufWriter::new(&stream);
+    writer.write_fmt(format_args!("response {}", buffer));
+    writer.flush();
 }
 
 fn previous_engine() -> Result<Option<Engine>> {
