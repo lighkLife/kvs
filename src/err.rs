@@ -14,6 +14,9 @@ pub enum KvsError {
     /// Remove a not exit key error
     #[fail(display = "Key not found")]
     KeyNotFound,
+    /// Server config is invalid error.
+    #[fail(display = "invalid config")]
+    InvalidConfig(msg),
     /// Unknown command
     #[fail(display = "Unknown command")]
     UnknownCommand,
