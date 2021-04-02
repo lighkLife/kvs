@@ -17,6 +17,9 @@ pub enum KvsError {
     /// Server config is invalid error.
     #[fail(display = "Server start failed.")]
     ServerStart,
+    /// Client send a invalid request error.
+    #[fail(display = "Bad request: {}", _0)]
+    BadRequest(String),
     /// Unknown command
     #[fail(display = "Unknown command")]
     UnknownCommand,

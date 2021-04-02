@@ -1,7 +1,9 @@
 use std::net::{SocketAddr, TcpStream};
 use structopt::StructOpt;
-use std::io::{BufReader, BufWriter, Write, Read};
+use std::io::{BufReader, BufWriter, Write, Read, BufRead};
 use kvs::*;
+use std::process::exit;
+
 const DEFAULT_ADDR: &str = "127.0.0.1:4000";
 
 
@@ -60,23 +62,32 @@ enum Cmd {
     },
 }
 
-fn main(){
+fn main() {
     let opt = Opt::from_args() as Opt;
+    if let Err(e) = run(opt) {
+        eprintln!("{}", e);
+        exit(1);
+    }
+}
+
+fn run(opt: Opt) -> Result<()> {
     match opt.cmd {
         Cmd::Get { key, addr } => {
-            let writer_stream = TcpStream::connect(addr).unwrap();
-            let reader_stream = writer_stream.try_clone().unwrap();
-
-            let mut writer = BufWriter::new(writer_stream);
-            writer.write_fmt(format_args!("Get {}", key));
-            writer.flush();
-
-            let mut reader = BufReader::new(reader_stream);
-            let mut buffer = String::new();
-            reader.read_to_string(&mut buffer);
-            println!("response:{}", buffer);
+            let mut client = KvsClient::connect(addr)?;
+            if let Some(value) = client.get(key)? {
+                println!("{}", value)
+            } else {
+                println!("Key not found");
+            }
         }
-        Cmd::Set { key, value, addr } => {}
-        Cmd::Rm { key, addr } => {}
+        Cmd::Set { key, value, addr } => {
+            let mut client = KvsClient::connect(addr)?;
+            client.set(key, value)?;
+        }
+        Cmd::Rm { key, addr } => {
+            let mut client = KvsClient::connect(addr)?;
+            client.remove(key)?;
+        }
     }
+    Ok(())
 }
