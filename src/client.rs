@@ -6,12 +6,14 @@ use crate::{KvsError, Result};
 use crate::protocol::{GetResponse, SetResponse, RemoveResponse, KvsRequest};
 use serde::Deserialize;
 
+/// Kvs Client.
 pub struct KvsClient {
     reader: Deserializer<IoRead<BufReader<TcpStream>>>,
     writer: BufWriter<TcpStream>,
 }
 
 impl KvsClient {
+    /// connect to kvs server
     pub fn connect<A: ToSocketAddrs>(addr: A) -> Result<Self> {
         let reader_stream = TcpStream::connect(addr)?;
         let writer_stream = reader_stream.try_clone()?;
@@ -21,6 +23,7 @@ impl KvsClient {
         })
     }
 
+    /// get value of key from server
     pub fn get(&mut self, key: String) -> Result<Option<String>> {
         serde_json::to_writer(&mut self.writer, &KvsRequest::Get { key })?;
         self.writer.flush()?;
@@ -31,6 +34,7 @@ impl KvsClient {
         }
     }
 
+    /// set value for key to server
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         serde_json::to_writer(&mut self.writer, &KvsRequest::Set { key, value })?;
         self.writer.flush();
@@ -41,6 +45,7 @@ impl KvsClient {
         }
     }
 
+    /// remove key and value from server
     pub fn remove(&mut self, key: String) -> Result<()> {
         serde_json::to_writer(&mut self.writer, &KvsRequest::Remove { key })?;
         self.writer.flush();

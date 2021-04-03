@@ -64,13 +64,14 @@ enum Cmd {
 
 fn main() {
     let opt = Opt::from_args() as Opt;
-    if let Err(e) = run(opt) {
+    if let Err(e) = execute(opt) {
         eprintln!("{}", e);
         exit(1);
     }
 }
 
-fn run(opt: Opt) -> Result<()> {
+/// execute command that parse from args.
+fn execute(opt: Opt) -> Result<()> {
     match opt.cmd {
         Cmd::Get { key, addr } => {
             let mut client = KvsClient::connect(addr)?;
