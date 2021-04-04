@@ -30,7 +30,7 @@ impl KvsClient {
         let response = GetResponse::deserialize(&mut self.reader)?;
         match response {
             GetResponse::Ok(value) => Ok(value),
-            GetResponse::Err(msg) => Err(KvsError::BadRequest(msg)),
+            GetResponse::Err(msg) => Err(KvsError::InvalidOperation(msg)),
         }
     }
 
@@ -41,7 +41,7 @@ impl KvsClient {
         let response = SetResponse::deserialize(&mut self.reader)?;
         match response {
             SetResponse::Ok(()) => Ok(()),
-            SetResponse::Err(msg) => Err(KvsError::BadRequest(msg)),
+            SetResponse::Err(msg) => Err(KvsError::InvalidOperation(msg)),
         }
     }
 
@@ -52,7 +52,7 @@ impl KvsClient {
         let response = RemoveResponse::deserialize(&mut self.reader)?;
         match response {
             RemoveResponse::Ok(()) => Ok(()),
-            RemoveResponse::Err(msg) => Err(KvsError::BadRequest(msg)),
+            RemoveResponse::Err(msg) => Err(KvsError::InvalidOperation(msg)),
         }
     }
 }

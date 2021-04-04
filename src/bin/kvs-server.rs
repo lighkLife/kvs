@@ -65,8 +65,13 @@ fn main() {
 
             //save engine type.
             fs::write(current_dir()?.join(ENGINE_FILE_NAME), format!("{}", engine))?;
-            let server = KvsServer::new();
-            server.start(opt.addr)?;
+
+            match engine {
+                Engine::kvs =>
+                    start_server(&mut opt, KvStore::open(current_dir()?)?),
+                Engine::sled =>
+                    start_server(&mut opt, SledKvsEngine::open(current_dir()?)?),
+            };
             Ok(())
         });
     if let Err(e) = result {
@@ -75,6 +80,11 @@ fn main() {
     }
 }
 
+fn start_server<E: KvsEngine>(mut opt: &mut Opt, engine: E) -> Result<()> {
+    let server = KvsServer::new(engine);
+    server.start(opt.addr)?;
+    Ok(())
+}
 
 
 fn previous_engine() -> Result<Option<Engine>> {
