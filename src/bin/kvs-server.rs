@@ -10,7 +10,6 @@ use std::fs;
 use std::process::exit;
 use std::io::{Read, BufReader, BufWriter, Write};
 
-
 const DEFAULT_ADDR: &str = "127.0.0.1:4000";
 const DEFAULT_ENGINE: Engine = Engine::kvs;
 const ENGINE_FILE_NAME: &str = "engine";
@@ -66,12 +65,8 @@ fn main() {
 
             //save engine type.
             fs::write(current_dir()?.join(ENGINE_FILE_NAME), format!("{}", engine))?;
-
-            let listener = TcpListener::bind(opt.addr)?;
-            // accept connections and process them serially
-            for stream in listener.incoming() {
-                handle_client(stream?);
-            }
+            let server = KvsServer::new();
+            server.start(opt.addr)?;
             Ok(())
         });
     if let Err(e) = result {
@@ -80,15 +75,7 @@ fn main() {
     }
 }
 
-fn handle_client(stream: TcpStream) {
-    let mut buffer = String::new();
-    let mut reader = BufReader::new(&stream);
-    reader.read_to_string(&mut buffer);
-    debug!("receive: {}", buffer);
-    let mut writer = BufWriter::new(&stream);
-    writer.write_fmt(format_args!("response {}", buffer));
-    writer.flush();
-}
+
 
 fn previous_engine() -> Result<Option<Engine>> {
     let engine_path = current_dir()?.join(ENGINE_FILE_NAME);
