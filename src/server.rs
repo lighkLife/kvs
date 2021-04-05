@@ -45,22 +45,28 @@ impl<E: KvsEngine> KvsServer<E> {
             debug!("recv from {}: {:?}", &peer, &request);
             match request {
                 KvsRequest::Get { key } => {
-                    let value = self.engine.get(key)?;
-                    let response = GetResponse::Ok(value);
+                    let response = match self.engine.get(key) {
+                        Ok(value) => GetResponse::Ok(value),
+                        Err(e) => GetResponse::Err(format!("{}", e)),
+                    };
                     serde_json::to_writer(&mut writer, &response)?;
                     writer.flush()?;
                     debug!("resp to   {}: {:?}", &peer, &response);
                 }
                 KvsRequest::Set { key, value } => {
-                    let value = self.engine.set(key, value)?;
-                    let response = SetResponse::Ok(value);
+                    let response = match self.engine.set(key, value) {
+                        Ok(value) => SetResponse::Ok(value),
+                        Err(e) => SetResponse::Err(format!("{}", e)),
+                    };
                     serde_json::to_writer(&mut writer, &response)?;
                     writer.flush()?;
                     debug!("resp to   {}: {:?}", &peer, &response);
                 }
                 KvsRequest::Remove { key } => {
-                    let value = self.engine.remove(key)?;
-                    let response = SetResponse::Ok(value);
+                    let response = match self.engine.remove(key) {
+                        Ok(value) => RemoveResponse::Ok(value),
+                        Err(e) => RemoveResponse::Err(format!("{}", e)),
+                    };
                     serde_json::to_writer(&mut writer, &response)?;
                     writer.flush()?;
                     debug!("resp to   {}: {:?}", &peer, &response);
