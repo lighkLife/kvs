@@ -1,9 +1,48 @@
-## Project spec
-
+## Overvire
 The cargo project, `kvs`, builds a command-line key-value store client called
 `kvs-client`, and a key-value store server called `kvs-server`, both of which in
 turn call into a library called `kvs`. The client speaks to the server over
 a custom protocol.
+
+**kvs-server**
+```bash
+lighk$kvs-server -h
+kvs-server 0.1.0
+A key-value storage server.
+
+USAGE:
+    kvs-server [OPTIONS]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --addr <IP:PORT>          Set ip address and port number with the format IP:PORT. [default: 127.0.0.1:4000]
+        --engine <ENGINE-NAME>    Set storage engines, either kvs or sled. [possible values: kvs, sled]
+```
+
+```bash
+lighk$kvs-client -h
+kvs-client 0.1.0
+A client for kvs server.
+
+USAGE:
+    kvs-client <SUBCOMMAND>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    get     Get the string value of a given string key.
+    help    Prints this message or the help of the given subcommand(s)
+    rm      Remove a given key.
+    set     Set the value of a string key to a string.
+```
+
+
+## Project spec
 
 - `kvs-server [--addr IP-PORT] [--engine ENGINE-NAME]`
 
