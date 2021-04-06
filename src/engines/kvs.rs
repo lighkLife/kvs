@@ -61,8 +61,8 @@ impl KvStore {
             readers.insert(log_number, reader);
         }
 
-        // set the max number as the active log file for writing log
-        let active_log_number = log_number_list.iter().max().unwrap_or(&1) + 0;
+        // open a new log file as the active file for writing logs
+        let active_log_number = log_number_list.iter().max().unwrap_or(&0) + 1;
         // init writer
         let writer = create_log_file(active_log_number, &path, &mut readers)?;
 
