@@ -21,7 +21,7 @@ OPTIONS:
         --addr <IP:PORT>          Set ip address and port number with the format IP:PORT. [default: 127.0.0.1:4000]
         --engine <ENGINE-NAME>    Set storage engines, either kvs or sled. [possible values: kvs, sled]
 ```
-
+**kvs-client**
 ```bash
 lighk$kvs-client -h
 kvs-client 0.1.0
