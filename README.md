@@ -5,35 +5,62 @@ The cargo project, `kvs`, builds a command-line key-value store client called
 turn call into a library called `kvs`. The client speaks to the server over
 a custom protocol.
 
-The interface to the CLI is the same as in the [previous project]. The
-difference this time is in the concurrent implementation, which will be
-described as we work through it.
+- `kvs-server [--addr IP-PORT] [--engine ENGINE-NAME]`
 
-[previous project]: ../project-3/README.md
+  Start the server and begin listening for incoming connections. `--addr`
+  accepts an IP address, either v4 or v6, and a port number, with the format
+  `IP:PORT`. If `--addr` is not specified then listen on `127.0.0.1:4000`.
 
-The library interface is nearly the same except for two things. First this time
-all the `KvsEngine`, `KvStore`, etc. methods take `&self` instead of `&mut
-self`, and now it implements `Clone`. This is common with concurrent
-data structures. Why is that? It's not that we're not going to be writing
-immutable code. It _is_ though going to be shared across threads. Why might that
-preclude using `&mut self` in the method signatures? If you don't know now,
-it will become obvious by the end of this project.
+  If `--engine` is specified, then `ENGINE-NAME` must be either "kvs", in which
+  case the built-in engine is used, or "sled", in which case sled is used. If
+  this is the first run (there is no data previously persisted) then the default
+  value is "kvs"; if there is previously persisted data then the default is the
+  engine already in use. If data was previously persisted with a different
+  engine than selected, print an error and exit with a non-zero exit code.
 
-The second is that the library in this project contains a new _trait_,
-`ThreadPool`. It contains the following methods:
+  Print an error and return a non-zero exit code on failure to bind a socket, if
+  `ENGINE-NAME` is invalid, if `IP-PORT` does not parse as an address.
 
-- `ThreadPool::new(threads: u32) -> Result<ThreadPool>`
+- `kvs-server -V`
 
-  Creates a new thread pool, immediately spawning the specified number of
-  threads.
+  Print the version.
 
-  Returns an error if any thread fails to spawn. All previously-spawned threads
-  are terminated.
+The `kvs-client` executable supports the following command line arguments:
 
-- `ThreadPool::spawn<F>(&self, job: F) where F: FnOnce() + Send + 'static`
+- `kvs-client set <KEY> <VALUE> [--addr IP-PORT]`
 
-  Spawn a function into the threadpool.
+  Set the value of a string key to a string.
 
-  Spawning always succeeds, but if the function panics the threadpool continues
-  to operate with the same number of threads &mdash; the thread count is not
-  reduced nor is the thread pool destroyed, corrupted or invalidated.
+  `--addr` accepts an IP address, either v4 or v6, and a port number, with the
+  format `IP:PORT`. If `--addr` is not specified then connect on
+  `127.0.0.1:4000`.
+
+  Print an error and return a non-zero exit code on server error,
+  or if `IP-PORT` does not parse as an address.
+
+- `kvs-client get <KEY> [--addr IP-PORT]`
+
+  Get the string value of a given string key.
+
+  `--addr` accepts an IP address, either v4 or v6, and a port number, with the
+  format `IP:PORT`. If `--addr` is not specified then connect on
+  `127.0.0.1:4000`.
+
+  Print an error and return a non-zero exit code on server error,
+  or if `IP-PORT` does not parse as an address.
+
+- `kvs-client rm <KEY> [--addr IP-PORT]`
+
+  Remove a given string key.
+
+  `--addr` accepts an IP address, either v4 or v6, and a port number, with the
+  format `IP:PORT`. If `--addr` is not specified then connect on
+  `127.0.0.1:4000`.
+
+  Print an error and return a non-zero exit code on server error,
+  or if `IP-PORT` does not parse as an address. A "key not found" is also
+  treated as an error in the "rm" command.
+
+- `kvs-client -V`
+
+  Print the version.
