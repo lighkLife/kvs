@@ -1,3 +1,6 @@
+*.log
+engine
+
 *~
 target/
 ### Rust template

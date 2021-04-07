@@ -1,6 +1,5 @@
-use std::net::{SocketAddr, TcpStream};
+use std::net::SocketAddr;
 use structopt::StructOpt;
-use std::io::{BufReader, BufWriter, Write, Read, BufRead};
 use kvs::*;
 use std::process::exit;
 

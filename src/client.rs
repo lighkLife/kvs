@@ -1,7 +1,7 @@
 use serde_json::de::Deserializer;
 use serde_json::de::{IoRead};
 use std::io::{BufReader, BufWriter, Write};
-use std::net::{TcpStream, SocketAddr, ToSocketAddrs};
+use std::net::{TcpStream, ToSocketAddrs};
 use crate::{KvsError, Result};
 use crate::protocol::{GetResponse, SetResponse, RemoveResponse, KvsRequest};
 use serde::Deserialize;
@@ -37,7 +37,7 @@ impl KvsClient {
     /// set value for key to server
     pub fn set(&mut self, key: String, value: String) -> Result<()> {
         serde_json::to_writer(&mut self.writer, &KvsRequest::Set { key, value })?;
-        self.writer.flush();
+        self.writer.flush()?;
         let response = SetResponse::deserialize(&mut self.reader)?;
         match response {
             SetResponse::Ok(()) => Ok(()),
@@ -48,7 +48,7 @@ impl KvsClient {
     /// remove key and value from server
     pub fn remove(&mut self, key: String) -> Result<()> {
         serde_json::to_writer(&mut self.writer, &KvsRequest::Remove { key })?;
-        self.writer.flush();
+        self.writer.flush()?;
         let response = RemoveResponse::deserialize(&mut self.reader)?;
         match response {
             RemoveResponse::Ok(()) => Ok(()),

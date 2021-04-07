@@ -1,6 +1,5 @@
 use std::net::{ToSocketAddrs, TcpListener, TcpStream};
 use crate::err::Result;
-use crate::KvsError;
 use crate::protocol::*;
 use log::{debug, error};
 use std::io::{BufReader, BufWriter, Write};
@@ -33,7 +32,7 @@ impl<E: KvsEngine> KvsServer<E> {
         Ok(())
     }
 
-    fn handle_client(&mut self, mut stream: TcpStream) -> Result<()> {
+    fn handle_client(&mut self, stream: TcpStream) -> Result<()> {
         let peer = stream.peer_addr()?;
         debug!("Connection established from {}", &peer);
         let reader = BufReader::new(&stream);
