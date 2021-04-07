@@ -1,6 +1,5 @@
 use sled::Db;
 use crate::engines::KvsEngine;
-use std::path::Path;
 use crate::{Result, KvsError};
 
 /// sled ksv engine

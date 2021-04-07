@@ -1,14 +1,12 @@
 use clap::arg_enum;
 use structopt::StructOpt;
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::fmt::{Display, Formatter};
-use log::{error, info, warn, debug};
+use std::net::SocketAddr;
+use log::{error, info, debug};
 use log::LevelFilter;
 use std::env::current_dir;
 use kvs::*;
 use std::fs;
 use std::process::exit;
-use std::io::{Read, BufReader, BufWriter, Write};
 
 const DEFAULT_ADDR: &str = "127.0.0.1:4000";
 const DEFAULT_ENGINE: Engine = Engine::kvs;
@@ -68,9 +66,9 @@ fn main() {
 
             match engine {
                 Engine::kvs =>
-                    start_server(&mut opt, KvStore::open(current_dir()?)?),
+                    start_server(&mut opt, KvStore::open(current_dir()?)?)?,
                 Engine::sled =>
-                    start_server(&mut opt, SledKvsEngine::open(current_dir()?)?),
+                    start_server(&mut opt, SledKvsEngine::open(current_dir()?)?)?,
             };
             Ok(())
         });
@@ -80,7 +78,7 @@ fn main() {
     }
 }
 
-fn start_server<E: KvsEngine>(mut opt: &mut Opt, engine: E) -> Result<()> {
+fn start_server<E: KvsEngine>(opt: &mut Opt, engine: E) -> Result<()> {
     let server = KvsServer::new(engine);
     server.start(opt.addr)?;
     Ok(())
