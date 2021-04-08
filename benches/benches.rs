@@ -1,92 +1,77 @@
 use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
 use kvs::{KvStore, KvsEngine, SledKvsEngine};
 use rand::prelude::*;
+use sled;
 use tempfile::TempDir;
-use std::time::Duration;
-use rand::distributions::{Alphanumeric, Standard};
-use std::collections::HashMap;
 
-
-fn bench_write(c: &mut Criterion) {
-    c.bench_function("write_kvs", |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let mut engine = KvStore::open(temp_dir.path()).unwrap();
-        let mut rng = StdRng::seed_from_u64(0);
-
-        b.iter_batched(
-            || gen_kv(&mut rng),
-            |(key, val)| engine.set(key, val).unwrap(),
-            BatchSize::SmallInput,
-        )
-    });
-    c.bench_function("write_sled", |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let mut engine = SledKvsEngine::open(temp_dir.path()).unwrap();
-        let mut rng = StdRng::seed_from_u64(0);
-
-        b.iter_batched(
-            || gen_kv(&mut rng),
-            |(key, val)| engine.set(key, val).unwrap(),
-            BatchSize::SmallInput,
-        )
-    });
-}
-
-fn bench_read(c: &mut Criterion) {
-    c.bench_function("read_kvs", |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let mut engine = KvStore::open(temp_dir.path()).unwrap();
-        let mut rng = StdRng::seed_from_u64(0);
-        let data = gen_data(&mut rng, &mut engine);
-
+fn set_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("set_bench");
+    group.bench_function("kvs", |b| {
         b.iter_batched(
             || {
-                let key = data.keys().choose(&mut rng).unwrap();
-                let value = data.get(key).unwrap();
-                (key.to_owned(), value.to_owned())
+                let temp_dir = TempDir::new().unwrap();
+                (KvStore::open(temp_dir.path()).unwrap(), temp_dir)
             },
-            |(key, value)| assert_eq!(engine.get(key).unwrap().unwrap(), value),
+            |(mut store, _temp_dir)| {
+                for i in 1..(1 << 12) {
+                    store.set(format!("key{}", i), "value".to_string()).unwrap();
+                }
+            },
             BatchSize::SmallInput,
         )
     });
-
-    c.bench_function("read_sled", |b| {
-        let temp_dir = TempDir::new().unwrap();
-        let mut engine = SledKvsEngine::open(temp_dir.path()).unwrap();
-        let mut rng = StdRng::seed_from_u64(0);
-        let data = gen_data(&mut rng, &mut engine);
-
+    group.bench_function("sled", |b| {
         b.iter_batched(
             || {
-                let key = data.keys().choose(&mut rng).unwrap();
-                let value = data.get(key).unwrap();
-                (key.to_owned(), value.to_owned())
+                let temp_dir = TempDir::new().unwrap();
+                (SledKvsEngine::open(&temp_dir).unwrap(), temp_dir)
             },
-            |(key, value)| assert_eq!(engine.get(key).unwrap().unwrap(), value),
+            |(mut db, _temp_dir)| {
+                for i in 1..(1 << 12) {
+                    db.set(format!("key{}", i), "value".to_string()).unwrap();
+                }
+            },
             BatchSize::SmallInput,
         )
     });
+    group.finish();
 }
 
-fn gen_data(mut rng: impl Rng, engine: &mut impl KvsEngine) -> HashMap<String, String> {
-    let mut data = HashMap::with_capacity(1000);
-    for _ in 0..1000 {
-        let (key, value) = gen_kv(&mut rng);
-        data.insert(key.clone(), value.clone());
-        engine.set(key, value).unwrap();
+fn get_bench(c: &mut Criterion) {
+    let mut group = c.benchmark_group("get_bench");
+    for i in &vec![8, 12, 16, 20] {
+        group.bench_with_input(format!("kvs_{}", i), i, |b, i| {
+            let temp_dir = TempDir::new().unwrap();
+            let mut store = KvStore::open(temp_dir.path()).unwrap();
+            for key_i in 1..(1 << i) {
+                store
+                    .set(format!("key{}", key_i), "value".to_string())
+                    .unwrap();
+            }
+            let mut rng = thread_rng();
+            b.iter(|| {
+                store
+                    .get(format!("key{}", rng.gen_range(1.. 1 << i)))
+                    .unwrap();
+            })
+        });
     }
-    data
+    for i in &vec![8, 12, 16, 20] {
+        group.bench_with_input(format!("sled_{}", i), i, |b, i| {
+            let temp_dir = TempDir::new().unwrap();
+            let mut db = SledKvsEngine::open(&temp_dir).unwrap();
+            for key_i in 1..(1 << i) {
+                db.set(format!("key{}", key_i), "value".to_string())
+                    .unwrap();
+            }
+            let mut rng = thread_rng();
+            b.iter(|| {
+                db.get(format!("key{}", rng.gen_range(1.. 1 << i))).unwrap();
+            })
+        });
+    }
+    group.finish();
 }
 
-fn gen_kv(mut rng: impl Rng) -> (String, String) {
-    let key_len = (&mut rng).gen_range(1..100001);
-    let key = (&mut rng).sample_iter::<char, _>(&Standard).take(key_len).collect();
-
-    let val_len = (&mut rng).gen_range(1..100001);
-    let val = (&mut rng).sample_iter::<char, _>(&Standard).take(val_len).collect();
-
-    (key, val)
-}
-
-criterion_group!(benches, bench_write, bench_read);
+criterion_group!(benches, set_bench, get_bench);
 criterion_main!(benches);
