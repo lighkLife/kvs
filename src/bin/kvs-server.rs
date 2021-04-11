@@ -65,10 +65,16 @@ fn main() {
             fs::write(current_dir()?.join(ENGINE_FILE_NAME), format!("{}", engine))?;
 
             match engine {
-                Engine::kvs =>
-                    start_server(&mut opt, KvStore::open(current_dir()?)?)?,
-                Engine::sled =>
-                    start_server(&mut opt, SledKvsEngine::open(current_dir()?)?)?,
+                Engine::kvs => {
+                    let store = KvStore::open(current_dir()?)?;
+                    let engine = KvsStoreEngine::new(store);
+                    start_server(&mut opt, engine)?;
+                }
+                Engine::sled => {
+                    let db = sled::open(current_dir()?)?;
+                    let engine = SledKvsEngine::new(db)?;
+                    start_server(&mut opt, engine)?;
+                }
             };
             Ok(())
         });

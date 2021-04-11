@@ -2,6 +2,8 @@ use failure::Fail;
 use std::io;
 use std::io::Error;
 use std::string::FromUtf8Error;
+use std::sync::{LockResult, PoisonError};
+use crate::KvStore;
 
 /// kvs error
 #[derive(Fail, Debug)]

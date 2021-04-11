@@ -3,21 +3,21 @@ use crate::engines::KvsEngine;
 use crate::{Result, KvsError};
 
 /// sled ksv engine
+#[derive(Clone)]
 pub struct SledKvsEngine {
-    db: Db,
+    engine: Db,
 }
 
 impl SledKvsEngine {
     /// create a SledKvsEngine instance
-    pub fn open<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
-        let db = sled::open(path)?;
-        Ok(SledKvsEngine { db })
+    pub fn new(engine: Db) -> Result<Self> {
+        Ok(SledKvsEngine { engine })
     }
 }
 
 impl KvsEngine for SledKvsEngine {
-    fn get(&mut self, key: String) -> Result<Option<String>> {
-        let value = self.db.get(key)?;
+    fn get(&self, key: String) -> Result<Option<String>> {
+        let value = self.engine.get(key)?;
         Ok(value
             .map(|i_vec| AsRef::as_ref(&i_vec).to_vec())
             .map(String::from_utf8)
@@ -25,15 +25,15 @@ impl KvsEngine for SledKvsEngine {
         )
     }
 
-    fn set(&mut self, key: String, value: String) -> Result<()> {
-        self.db.insert(key, value.into_bytes()).map(|_| ())?;
-        self.db.flush()?;
+    fn set(&self, key: String, value: String) -> Result<()> {
+        self.engine.insert(key, value.into_bytes()).map(|_| ())?;
+        self.engine.flush()?;
         Ok(())
     }
 
-    fn remove(&mut self, key: String) -> Result<()> {
-        self.db.remove(key)?.ok_or(KvsError::KeyNotFound)?;
-        self.db.flush()?;
+    fn remove(&self, key: String) -> Result<()> {
+        self.engine.remove(key)?.ok_or(KvsError::KeyNotFound)?;
+        self.engine.flush()?;
         Ok(())
     }
 }

@@ -10,6 +10,10 @@ use crate::{KvsError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use crate::engines::KvsEngine;
+use std::sync::{Arc, Mutex, RwLock};
+use std::sync::atomic::{AtomicU64};
+use std::cell::RefMut;
+use std::ops::DerefMut;
 
 
 const MERGED_THRESHOLD: u64 = 1024;
@@ -76,9 +80,65 @@ impl KvStore {
         })
     }
 
+    /// Get the string value of a string key.
+        /// If the key does not exist, return None.
+        /// Return an error if the value is not read successfully.
+    pub fn get(&mut self, key: String) -> Result<Option<String>> {
+        if let Some(cmd_info) = self.index.get(&key) {
+            let reader = self.readers.get_mut(&cmd_info.log_number)
+                .expect("reader not found");
+            reader.seek(SeekFrom::Start(cmd_info.pos_start))?;
+            let log_reader = reader.take(cmd_info.length);
+            if let Command::Set { value, .. } = serde_json::from_reader(log_reader)? {
+                Ok(Some(value))
+            } else {
+                Err(KvsError::UnknownCommand)
+            }
+        } else {
+            Ok(None)
+        }
+    }
+    /// Set the value of a string key to a string.
+    /// Return an error if the value is not written successfully.
+    pub fn set(&mut self, key: String, value: String) -> Result<()> {
+        let start_pos = self.writer.pos;
+        let cmd = Command::set(key, value);
+        serde_json::to_writer(self.writer.by_ref(), &cmd)?;
+        self.writer.flush()?;
+        if let Command::Set { key, .. } = cmd {
+            let current_pos = self.writer.pos;
+            let info = CommandInfo::new(self.active_log_number, start_pos, current_pos);
+            if let Some(old_cmd_info) = self.index.insert(key, info) {
+                self.unmerged += old_cmd_info.length;
+            }
+        }
+        if self.unmerged > MERGED_THRESHOLD {
+            self.merge()?;
+        }
+        Ok(())
+    }
+
+
+    /// Remove a given key.
+    /// Return an error if the key does not exist or is not removed successfully.
+    pub fn remove(&mut self, key: String) -> Result<()> {
+        if self.index.contains_key(&key) {
+            let cmd = Command::remove(key);
+            serde_json::to_writer(self.writer.by_ref(), &cmd)?;
+            self.writer.flush()?;
+            if let Command::Remove { key } = cmd {
+                let old_cmd_info = self.index.remove(&key)
+                    .expect("Key not found");
+                self.unmerged += old_cmd_info.length;
+            }
+            Ok(())
+        } else {
+            Err(KvsError::KeyNotFound)
+        }
+    }
 
     /// merge log files to a merged file and delete invalid command
-    fn merge(&mut self) -> Result<()> {
+    pub fn merge(&mut self) -> Result<()> {
         // copy valid command to a new log file
         self.active_log_number += 1;
         let new_log_number = self.active_log_number;
@@ -286,62 +346,34 @@ impl<W: Write + Seek> Seek for KvsBufWriter<W> {
 }
 
 
-impl KvsEngine for KvStore {
-    /// Get the string value of a string key.
-    /// If the key does not exist, return None.
-    /// Return an error if the value is not read successfully.
-    fn get(&mut self, key: String) -> Result<Option<String>> {
-        if let Some(cmd_info) = self.index.get(&key) {
-            let reader = self.readers.get_mut(&cmd_info.log_number)
-                .expect("reader not found");
-            reader.seek(SeekFrom::Start(cmd_info.pos_start))?;
-            let log_reader = reader.take(cmd_info.length);
-            if let Command::Set { value, .. } = serde_json::from_reader(log_reader)? {
-                Ok(Some(value))
-            } else {
-                Err(KvsError::UnknownCommand)
-            }
-        } else {
-            Ok(None)
-        }
+/// KvsStore engine
+#[derive(Clone)]
+pub struct KvsStoreEngine{
+    engine: Arc<Mutex<KvStore>>,
+}
+
+impl KvsStoreEngine{
+    /// create a kvsStore engine
+    pub fn new(engine : KvStore) -> Arc<Mutex<KvStore>>{
+        Arc::new(Mutex::new(engine))
     }
-    /// Set the value of a string key to a string.
-    /// Return an error if the value is not written successfully.
-    fn set(&mut self, key: String, value: String) -> Result<()> {
-        let start_pos = self.writer.pos;
-        let cmd = Command::set(key, value);
-        serde_json::to_writer(self.writer.by_ref(), &cmd)?;
-        self.writer.flush()?;
-        if let Command::Set { key, .. } = cmd {
-            let current_pos = self.writer.pos;
-            let info = CommandInfo::new(self.active_log_number, start_pos, current_pos);
-            if let Some(old_cmd_info) = self.index.insert(key, info) {
-                self.unmerged += old_cmd_info.length;
-            }
-        }
-        if self.unmerged > MERGED_THRESHOLD {
-            self.merge()?;
-        }
-        Ok(())
-    }
+}
 
 
-    /// Remove a given key.
-    /// Return an error if the key does not exist or is not removed successfully.
-    fn remove(&mut self, key: String) -> Result<()> {
-        if self.index.contains_key(&key) {
-            let cmd = Command::remove(key);
-            serde_json::to_writer(self.writer.by_ref(), &cmd)?;
-            self.writer.flush()?;
-            if let Command::Remove { key } = cmd {
-                let old_cmd_info = self.index.remove(&key)
-                    .expect("Key not found");
-                self.unmerged += old_cmd_info.length;
-            }
-            Ok(())
-        } else {
-            Err(KvsError::KeyNotFound)
-        }
+impl KvsEngine for KvsStoreEngine {
+    fn get(&self, key: String) -> Result<Option<String>> {
+        let mut engine = self.engine.lock().unwrap();
+        engine.get(key)
+    }
+
+    fn set(&self, key: String, value: String) -> Result<()> {
+        let mut engine = self.engine.lock().unwrap();
+        (*engine).set(key, value)
+    }
+
+    fn remove(&self, key: String) -> Result<()> {
+        let mut engine = self.engine.lock().unwrap();
+        (*engine).remove(key)
     }
 }
 
