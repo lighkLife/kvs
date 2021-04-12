@@ -2,7 +2,7 @@ use super::ThreadPool;
 use crate::Result;
 use std::thread;
 
-/// a thread pool that spawn function in a new thread
+/// a naive thread pool that creating a new thread for every job
 pub struct NaiveThreadPool;
 
 impl ThreadPool for NaiveThreadPool {

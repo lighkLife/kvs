@@ -23,6 +23,7 @@ rand = "0.8.3"
 tempfile = "3.0.7"
 walkdir = "2.2.7"
 crossbeam-utils = "0.6.5"
+panic-control = "0.1.4"
 
 [[bench]]
 name = "benches"
