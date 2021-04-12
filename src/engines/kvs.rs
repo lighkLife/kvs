@@ -10,10 +10,7 @@ use crate::{KvsError, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use crate::engines::KvsEngine;
-use std::sync::{Arc, Mutex, RwLock};
-use std::sync::atomic::{AtomicU64};
-use std::cell::RefMut;
-use std::ops::DerefMut;
+use std::sync::{Arc, Mutex};
 
 
 const MERGED_THRESHOLD: u64 = 1024;
@@ -348,14 +345,15 @@ impl<W: Write + Seek> Seek for KvsBufWriter<W> {
 
 /// KvsStore engine
 #[derive(Clone)]
-pub struct KvsStoreEngine{
+pub struct KvsStoreEngine {
     engine: Arc<Mutex<KvStore>>,
 }
 
-impl KvsStoreEngine{
+impl KvsStoreEngine {
     /// create a kvsStore engine
-    pub fn new(engine : KvStore) -> Arc<Mutex<KvStore>>{
-        Arc::new(Mutex::new(engine))
+    pub fn new(engine: KvStore) -> KvsStoreEngine {
+        let engine = Arc::new(Mutex::new(engine));
+        KvsStoreEngine { engine }
     }
 }
 

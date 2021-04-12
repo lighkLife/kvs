@@ -5,7 +5,6 @@ use log::{debug, error};
 use std::io::{BufReader, BufWriter, Write};
 use crate::engines::KvsEngine;
 use crate::thread_pool::{NaiveThreadPool, ThreadPool};
-use std::sync::Arc;
 
 /// struct server
 pub struct KvsServer<E: KvsEngine> {
@@ -19,7 +18,7 @@ impl<E: KvsEngine> KvsServer<E> {
     }
 
     /// Start kvs server
-    pub fn start<A: ToSocketAddrs>(mut self, addr: A) -> Result<()> {
+    pub fn start<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
         let pool = NaiveThreadPool::new(16)?;
         let listener = TcpListener::bind(addr)?;
         for stream in listener.incoming() {
