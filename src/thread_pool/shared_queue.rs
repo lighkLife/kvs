@@ -2,9 +2,8 @@ use crate::thread_pool::ThreadPool;
 use crate::Result;
 use std::sync::mpsc::{Sender, Receiver, channel};
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use std::thread;
-use log::{warn, error, info, debug};
+use log::{error, info, debug};
 
 enum Message {
     NewJob(Job),
@@ -15,69 +14,87 @@ type Job = Box<dyn FnOnce() + Send + 'static>;
 
 /// a simple thread pool
 pub struct SharedQueueThreadPool {
+    count: u32,
     sender: Sender<Message>,
-    workers: Vec<Worker>,
 }
 
 /// thread pool worker
 struct Worker {
     id: u32,
+    active: bool,
     receiver: Arc<Mutex<Receiver<Message>>>,
-    handle: Option<JoinHandle<()>>,
 }
 
 impl Worker {
+    /// create a worker
     fn new(id: u32, receiver: Arc<Mutex<Receiver<Message>>>) -> Worker {
         let receiver_clone = Arc::clone(&receiver);
-        let handle = thread::spawn(move || run_job(id, receiver));
-        Worker { id, receiver: receiver_clone, handle: Some(handle) }
+        Worker { id, active: true, receiver: receiver_clone }
     }
-}
 
-fn run_job(id: u32, receiver: Arc<Mutex<Receiver<Message>>>) {
-    loop {
-        let receiver = receiver.lock()
-            .expect("get lock failed");
-        let msg = receiver.recv()
-            .expect("the corresponding channel has hung up.");
-        match msg {
-            Message::NewJob(job) => {
-                job();
-            }
-            Message::Shutdown => {
-                info!("ThreadPool work {} is shutting down", id);
-                break;
-            }
-        };
+    /// mark this worker is not active
+    fn cancel(mut self) {
+        debug!("work {} be canceled ", self.id);
+        self.active = false;
     }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        if thread::panicking() {
-            error!("thread panicking");
-            let id = self.id;
-            let receiver = Arc::clone(&self.receiver);
-            if let Err(e) = thread::Builder::new().spawn(move || run_job(id, receiver)) {
-                error!("Failed to spawn a thread: {}", e);
+        if self.active {
+            // only create a new thread for panic worker that is active
+            if thread::panicking() {
+                spawn_thread(self.id, Arc::clone(&self.receiver));
             }
         }
     }
 }
 
+fn spawn_thread(id: u32, receiver: Arc<Mutex<Receiver<Message>>>) {
+    thread::Builder::new().spawn(move || {
+        let worker = Worker::new(id, receiver);
+        loop {
+            let msg = {
+                let receiver = worker.receiver.lock()
+                    .expect("worker {} get lock failed");
+                receiver.recv()
+            };
+
+            match msg {
+                Ok(msg) => {
+                    match msg {
+                        Message::NewJob(job) => {
+                            job();
+                        }
+                        Message::Shutdown => {
+                            info!("ThreadPool work {} is shutting down", id);
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("worker error {}", e);
+                    break;
+                }
+            };
+        }
+        worker.cancel();
+    }).expect("create thread failed");
+}
+
+
 impl ThreadPool for SharedQueueThreadPool {
     fn new(threads: u32) -> Result<Self> where Self: Sized {
-        let (sender, receiver) = channel();
+        let (sender, receiver) = channel::<Message>();
         let receiver = Arc::new(Mutex::new(receiver));
 
-        let mut workers = Vec::with_capacity(threads as usize);
         for id in 0..threads {
             let receiver = Arc::clone(&receiver);
-            workers.push(Worker::new(id, receiver));
+            spawn_thread(id, receiver);
         }
         Ok(SharedQueueThreadPool {
+            count: threads,
             sender,
-            workers,
         })
     }
 
@@ -90,15 +107,10 @@ impl ThreadPool for SharedQueueThreadPool {
 
 impl Drop for SharedQueueThreadPool {
     fn drop(&mut self) {
+        //todo graceful shutdown
         debug!("SharedQueueThreadPool: send shutdown message to all workers");
-        for _ in &mut self.workers {
-            self.sender.send(Message::Shutdown).unwrap();
-        }
-        for worker in &mut self.workers {
-            if let Some(handle) = worker.handle.take() {
-                handle.join().unwrap();
-            }
-            debug!("SharedQueueThreadPool: shutdown worker {}", worker.id);
+        for _ in 0..self.count {
+            self.sender.send(Message::Shutdown).expect("send msg error");
         }
     }
 }
