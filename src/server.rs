@@ -4,22 +4,21 @@ use crate::protocol::*;
 use log::{debug, error};
 use std::io::{BufReader, BufWriter, Write};
 use crate::engines::KvsEngine;
-use crate::thread_pool::{NaiveThreadPool, ThreadPool};
+use crate::thread_pool::{ThreadPool};
 
 /// struct server
-pub struct KvsServer<E: KvsEngine> {
+pub struct KvServer<E: KvsEngine> {
     engine: E,
 }
 
-impl<E: KvsEngine> KvsServer<E> {
+impl<E: KvsEngine> KvServer<E> {
     /// crate a kvs server instance
     pub fn new(engine: E) -> Self {
-        KvsServer { engine }
+        KvServer { engine }
     }
 
     /// Start kvs server
-    pub fn start<A: ToSocketAddrs>(self, addr: A) -> Result<()> {
-        let pool = NaiveThreadPool::new(16)?;
+    pub fn start<A: ToSocketAddrs, P: ThreadPool>(self, addr: A, pool: P) -> Result<()> {
         let listener = TcpListener::bind(addr)?;
         for stream in listener.incoming() {
             let engine = self.engine.clone();
@@ -34,8 +33,6 @@ impl<E: KvsEngine> KvsServer<E> {
         }
         Ok(())
     }
-
-
 }
 
 fn handle_client<E: KvsEngine>(engine: E, stream: TcpStream) -> Result<()> {

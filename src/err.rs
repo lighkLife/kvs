@@ -27,7 +27,7 @@ pub enum KvsError {
     ServerStart,
     /// Client send a invalid request to server.
     #[fail(display = "{}", _0)]
-    InvalidOperation(String),
+    StringError(String),
     /// Unknown command
     #[fail(display = "Unknown command")]
     UnknownCommand,

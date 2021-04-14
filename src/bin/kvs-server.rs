@@ -7,6 +7,7 @@ use std::env::current_dir;
 use kvs::*;
 use std::fs;
 use std::process::exit;
+use kvs::thread_pool::{ThreadPool, RayonThreadPool};
 
 const DEFAULT_ADDR: &str = "127.0.0.1:4000";
 const DEFAULT_ENGINE: Engine = Engine::kvs;
@@ -25,7 +26,7 @@ struct Opt {
     addr: SocketAddr,
     #[structopt(
     long,
-    help = "Set storage engines, either kvs or sled.",
+    help = "Set storage engines, either kvs or sled. Default kvs.",
     possible_values = & Engine::variants(),
     value_name = "ENGINE-NAME",
     )]
@@ -56,6 +57,8 @@ fn main() {
                        previous_engine.unwrap());
                 exit(1);
             }
+
+            let pool = RayonThreadPool::new(num_cpus::get() as u32)?;
             let engine = opt.engine.unwrap_or(DEFAULT_ENGINE);
             info!("kvs-server {}", env!("CARGO_PKG_VERSION"));
             info!("listening on {}", opt.addr);
@@ -63,17 +66,16 @@ fn main() {
 
             //save engine type.
             fs::write(current_dir()?.join(ENGINE_FILE_NAME), format!("{}", engine))?;
-
             match engine {
                 Engine::kvs => {
                     let store = KvStore::open(current_dir()?)?;
                     let engine = KvsStoreEngine::new(store);
-                    start_server(&mut opt, engine)?;
+                    start_server(&mut opt, engine, pool)?;
                 }
                 Engine::sled => {
                     let db = sled::open(current_dir()?)?;
                     let engine = SledKvsEngine::new(db)?;
-                    start_server(&mut opt, engine)?;
+                    start_server(&mut opt, engine, pool)?;
                 }
             };
             Ok(())
@@ -84,9 +86,9 @@ fn main() {
     }
 }
 
-fn start_server<E: KvsEngine>(opt: &mut Opt, engine: E) -> Result<()> {
-    let server = KvsServer::new(engine);
-    server.start(opt.addr)?;
+fn start_server<E: KvsEngine, P: ThreadPool>(opt: &mut Opt, engine: E, pool: P) -> Result<()> {
+    let server = KvServer::new(engine);
+    server.start(opt.addr, pool)?;
     Ok(())
 }
 
