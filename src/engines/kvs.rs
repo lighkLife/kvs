@@ -136,6 +136,7 @@ impl KvStore {
 
     /// merge log files to a merged file and delete invalid command
     pub fn merge(&mut self) -> Result<()> {
+        println!("merging");
         // copy valid command to a new log file
         self.active_log_number += 1;
         let new_log_number = self.active_log_number;
@@ -167,6 +168,7 @@ impl KvStore {
             self.readers.remove(&log_number);
             fs::remove_file(log_file_name(&self.path, log_number))?;
         }
+        self.unmerged = 0;
         Ok(())
     }
 
