@@ -73,5 +73,5 @@ fn get_bench(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, set_bench, get_bench);
-criterion_main!(benches);
+criterion_group!(engine, set_bench, get_bench);
+criterion_main!(engine);
