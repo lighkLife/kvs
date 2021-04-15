@@ -40,16 +40,12 @@ fn read_rayon_kv_store(c: &mut Criterion) {
 }
 
 
-fn create_server() -> KvServer<KvsStoreEngine> {
-    let temp_dir = TempDir::new().unwrap();
-    let kv_store = KvStore::open(temp_dir.path()).unwrap();
-    KvServer::new(KvsStoreEngine::new(kv_store))
-}
-
 fn start_server_queue(max_thread: u32) {
     for thread_count in 1..max_thread {
         thread::spawn(move || {
-            let server = create_server();
+            let temp_dir = TempDir::new().unwrap();
+            let kv_store = KvStore::open(temp_dir.path()).unwrap();
+            let server = KvServer::new(KvsStoreEngine::new(kv_store));
             let pool = SharedQueueThreadPool::new(thread_count).unwrap();
             let addr = format!("127.0.0.1:{}", 50000 + thread_count);
             server.start(&addr, pool).unwrap();
@@ -60,7 +56,9 @@ fn start_server_queue(max_thread: u32) {
 fn start_server_with_rayon(max_thread: u32) {
     for thread_count in 1..max_thread {
         thread::spawn(move || {
-            let server = create_server();
+            let temp_dir = TempDir::new().unwrap();
+            let kv_store = KvStore::open(temp_dir.path()).unwrap();
+            let server = KvServer::new(KvsStoreEngine::new(kv_store));
             let pool = RayonThreadPool::new(thread_count).unwrap();
             let addr = format!("127.0.0.1:{}", 50000 + thread_count);
             server.start(&addr, pool).unwrap();
@@ -89,7 +87,6 @@ fn run_write_bench(group: &mut BenchmarkGroup<WallTime>, max_thread: u32) {
             b.iter(|| {
                 for i in 0..1000 {
                     client.set(format!("key_{}", i), "value".to_string()).unwrap();
-                    println!("success-{}", i)
                 }
             });
         });

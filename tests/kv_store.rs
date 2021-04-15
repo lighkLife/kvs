@@ -1,6 +1,9 @@
-use kvs::{KvStore, Result};
-use tempfile::TempDir;
+use kvs::{KvStore, Result, KvsEngine, KvsStoreEngine};
+use tempfile::{TempDir, tempdir};
 use walkdir::WalkDir;
+use std::sync::{Arc, Barrier};
+use std::thread;
+use std::env::current_dir;
 
 // Should get previously stored value
 #[test]
@@ -83,11 +86,11 @@ fn remove_key() -> Result<()> {
 // Test data correctness after compaction.
 #[test]
 fn compaction() -> Result<()> {
-    let temp_dir = TempDir::new().expect("unable to create temporary working directory");
-    let mut store = KvStore::open(temp_dir.path())?;
+    let temp_dir = current_dir().expect("unable to create temporary working directory");
+    let mut store = KvStore::open(&temp_dir)?;
 
     let dir_size = || {
-        let entries = WalkDir::new(temp_dir.path()).into_iter();
+        let entries = WalkDir::new(&temp_dir).into_iter();
         let len: walkdir::Result<u64> = entries
             .map(|res| {
                 res.and_then(|entry| entry.metadata())
@@ -110,11 +113,19 @@ fn compaction() -> Result<()> {
             current_size = new_size;
             continue;
         }
+        drop(store);
+        // reopen and check content
+        let mut store = KvStore::open(&temp_dir)?;
+        for key_id in 0..500 {
+            let key = format!("key{}", key_id);
+            let value = format!("{}", iter);
+            store.set(key, value)?;
+        }
         // Compaction triggered
 
         drop(store);
         // reopen and check content
-        let mut store = KvStore::open(temp_dir.path())?;
+        let mut store = KvStore::open(&temp_dir)?;
         for key_id in 0..1000 {
             let key = format!("key{}", key_id);
             assert_eq!(store.get(key)?, Some(format!("{}", iter)));
@@ -123,4 +134,11 @@ fn compaction() -> Result<()> {
     }
 
     panic!("No compaction detected");
+}
+
+#[test]
+fn temp_file() -> Result<()>{
+    let dir = std::env::temp_dir();
+    println!("{:?}", dir);
+    Ok(())
 }

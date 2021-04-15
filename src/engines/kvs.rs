@@ -5,6 +5,8 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write, Seek, SeekFrom, Read};
 use std::path::{Path, PathBuf};
 
+use log::{debug};
+
 use crate::{KvsError, Result};
 
 use serde::{Deserialize, Serialize};
@@ -57,9 +59,9 @@ impl KvStore {
         let mut readers = HashMap::new();
         for &log_number in &log_number_list {
             let path = log_file_name(&path, log_number);
-            let mut reader = KvsBufReader::new(File::open(path)?)?;
+            let mut reader = KvsBufReader::new(File::open(&path)?)?;
             unmerged += load_log(log_number, &mut reader, &mut index)?;
-            readers.insert(log_number, reader);
+            readers.insert(log_number, KvsBufReader::new(File::open(&path)?)?);
         }
 
         // open a new log file as the active file for writing logs
@@ -136,7 +138,7 @@ impl KvStore {
 
     /// merge log files to a merged file and delete invalid command
     pub fn merge(&mut self) -> Result<()> {
-        println!("merging");
+        debug!("merging");
         // copy valid command to a new log file
         self.active_log_number += 1;
         let new_log_number = self.active_log_number;
