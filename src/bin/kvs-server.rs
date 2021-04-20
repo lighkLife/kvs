@@ -69,7 +69,6 @@ fn main() {
             match engine {
                 Engine::kvs => {
                     let store = KvStore::open(current_dir()?)?;
-                    let engine = KvsStoreEngine::new(store);
                     start_server(&mut opt, engine, pool)?;
                 }
                 Engine::sled => {

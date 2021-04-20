@@ -16,4 +16,4 @@ mod sled;
 mod kvs;
 
 pub use self::sled::SledKvsEngine;
-pub use self::kvs::{KvsStoreEngine, KvStore};
+pub use self::kvs::KvStore;
