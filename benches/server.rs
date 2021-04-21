@@ -1,5 +1,5 @@
 use criterion::{criterion_group, criterion_main, Criterion, BenchmarkGroup};
-use kvs::{KvServer, KvsStoreEngine, KvStore, KvsClient, SledKvsEngine};
+use kvs::{KvServer, KvStore, KvsClient, SledKvsEngine};
 use tempfile::TempDir;
 use kvs::thread_pool::{SharedQueueThreadPool, ThreadPool, RayonThreadPool};
 use std::thread;
@@ -63,7 +63,7 @@ fn start_kv_store_server_with_queue(max_thread: u32, port: u32) {
         thread::spawn(move || {
             let temp_dir = TempDir::new().unwrap();
             let kv_store = KvStore::open(temp_dir.path()).unwrap();
-            let server = KvServer::new(KvsStoreEngine::new(kv_store));
+            let server = KvServer::new(kv_store);
             let pool = SharedQueueThreadPool::new(thread_count).unwrap();
             let addr = format!("127.0.0.1:{}", port + thread_count);
             server.start(&addr, pool).unwrap();
@@ -76,7 +76,7 @@ fn start_kv_store_server_with_rayon(max_thread: u32, port: u32) {
         thread::spawn(move || {
             let temp_dir = TempDir::new().unwrap();
             let kv_store = KvStore::open(temp_dir.path()).unwrap();
-            let server = KvServer::new(KvsStoreEngine::new(kv_store));
+            let server = KvServer::new(kv_store);
             let pool = RayonThreadPool::new(thread_count).unwrap();
             let addr = format!("127.0.0.1:{}", port + thread_count);
             server.start(&addr, pool).unwrap();

@@ -12,7 +12,7 @@ fn set_bench(c: &mut Criterion) {
                 let temp_dir = TempDir::new().unwrap();
                 (KvStore::open(temp_dir.path()).unwrap(), temp_dir)
             },
-            |(mut store, _temp_dir)| {
+            |(store, _temp_dir)| {
                 for i in 1..(1 << 12) {
                     store.set(format!("key{}", i), "value".to_string()).unwrap();
                 }
@@ -42,7 +42,7 @@ fn get_bench(c: &mut Criterion) {
     for i in &vec![8, 12, 16, 20] {
         group.bench_with_input(format!("kvs_{}", i), i, |b, i| {
             let temp_dir = TempDir::new().unwrap();
-            let mut store = KvStore::open(temp_dir.path()).unwrap();
+            let store = KvStore::open(temp_dir.path()).unwrap();
             for key_i in 1..(1 << i) {
                 store
                     .set(format!("key{}", key_i), "value".to_string())

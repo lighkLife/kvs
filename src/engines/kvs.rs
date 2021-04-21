@@ -1,11 +1,11 @@
-use std::collections::{HashMap, BTreeMap};
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::{fs, io};
 use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Write, Seek, SeekFrom, Read};
 use std::path::{Path, PathBuf};
 
-use log::{debug};
+use log::{debug, error};
 
 use crate::{KvsError, Result};
 
@@ -13,12 +13,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
 use crate::engines::KvsEngine;
 use std::sync::{Arc, Mutex};
-use std::cell::{RefCell, RefMut};
+use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
-use skiplist::SkipMap;
+use crossbeam_skiplist::SkipMap;
 
 
-const MERGED_THRESHOLD: u64 = 1024;
+const MERGED_THRESHOLD: u64 = 100;
 const INIT_GENERATION: u64 = 0;
 
 /// The `KvStore` stores string key-value pairs.
@@ -27,12 +27,16 @@ const INIT_GENERATION: u64 = 0;
 ///
 /// Example:
 /// ```rust
-/// # use kvs::KvStore;
-/// let mut kvs = KvStore::new();
-/// kvs.set("key".to_owned(), "value".to_owned());
-/// assert_eq!(kvs.get("key".to_owned()), Some("value".to_owned()));
-/// kvs.remove("key".to_owned());
-/// assert_eq!(kvs.get("key".to_owned()), None);
+/// # use kvs::{KvStore, Result};
+/// # fn try_main() -> Result<()> {
+/// use std::env::current_dir;
+/// use kvs::KvsEngine;
+/// let mut store = KvStore::open(current_dir()?)?;
+/// store.set("key".to_owned(), "value".to_owned())?;
+/// let val = store.get("key".to_owned())?;
+/// assert_eq!(val, Some("value".to_owned()));
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Clone)]
 pub struct KvStore {
@@ -45,6 +49,8 @@ pub struct KvStore {
 }
 
 struct KvStoreWriter {
+    // directory of file
+    path: Arc<PathBuf>,
     // number of active log file
     write_generation: u64,
     // writer of active log file
@@ -76,7 +82,7 @@ impl Clone for KvStoreReader {
 
 impl KvStoreReader {
     fn read_command(&self, cmd_info: CommandInfo) -> Result<Command> {
-        self.read_and(cmd_info, |reader| serde_json::from_reader(reader)?)
+        self.read_and(cmd_info, |cmd_reader| Ok(serde_json::from_reader(cmd_reader)?))
     }
 
     fn read_and<F, R>(&self, cmd_info: CommandInfo, fuc: F) -> Result<R>
@@ -88,20 +94,21 @@ impl KvStoreReader {
         let mut readers = self.readers.borrow_mut();
         let cur_gen = cmd_info.generation;
         if !readers.contains_key(&cur_gen) {
-            let mut file = File::open(log_file_name(&self.path, cur_gen))?;
+            let file = File::open(log_file_name(&self.path, cur_gen))?;
             let reader = KvsBufReader::new(file)?;
             readers.insert(cur_gen, reader);
         }
         // read command from file
         let reader = readers.get_mut(&cur_gen).unwrap();
-        reader.seek(SeekFrom::Start(cmd_info.pos_start));
-        reader.take(cmd_info.length);
-        fuc(reader)
+        reader.seek(SeekFrom::Start(cmd_info.pos_start))?;
+        let cmd_reader = reader.take(cmd_info.length);
+        fuc(cmd_reader)
     }
 
     fn close_stale_reader(&self) {
         let mut readers = self.readers.borrow_mut();
-        for &generation in readers.keys() {
+        while !readers.is_empty() {
+            let generation = *readers.keys().next().unwrap();
             if generation < self.merged_gen.load(Ordering::SeqCst) {
                 readers.remove(&generation);
             } else {
@@ -120,11 +127,11 @@ impl KvStoreWriter {
         serde_json::to_writer(self.writer.by_ref(), &cmd)?;
         self.writer.flush()?;
         if let Command::Set { key, .. } = cmd {
-            let current_pos = self.writer.pos;
-            let info = CommandInfo::new(self.write_generation, start_pos, current_pos);
-            if let Some(old_cmd_info) = self.index.insert(key, info) {
-                self.unmerged += old_cmd_info.length;
+            if let Some(old_cmd_info) = self.index.get(&key) {
+                self.unmerged += old_cmd_info.value().length;
             }
+            let info = CommandInfo::new(self.write_generation, start_pos, self.writer.pos);
+            self.index.insert(key, info);
         }
         if self.unmerged > MERGED_THRESHOLD {
             self.merge()?;
@@ -143,7 +150,7 @@ impl KvStoreWriter {
             if let Command::Remove { key } = cmd {
                 let old_cmd_info = self.index.remove(&key)
                     .expect("Key not found");
-                self.unmerged += old_cmd_info.length;
+                self.unmerged += old_cmd_info.value().length;
             }
             Ok(())
         } else {
@@ -164,12 +171,12 @@ impl KvStoreWriter {
 
         // copy old generation file data to merged_generation file.
         let mut start_pos = 0;
-        for (key, command_info) in self.index.iter() {
-            let length = self.reader.read_and(*command_info.value(), |mut cmd_reader| {
+        for entry in self.index.iter() {
+            let length = self.reader.read_and(entry.value().clone(), |mut cmd_reader| {
                 Ok(io::copy(&mut cmd_reader, &mut new_writer)?)
             })?;
             let cmd_info = CommandInfo::new(merged_generation, start_pos, start_pos + length);
-            self.index.insert(key.clone(), cmd_info);
+            self.index.insert(entry.key().clone(), cmd_info);
             start_pos += length;
         }
         new_writer.flush()?;
@@ -177,13 +184,14 @@ impl KvStoreWriter {
         self.reader.close_stale_reader();
 
         // delete log file which have merged
-        let stale_generations: Vec<u64> = self.readers.keys()
-            .filter(|&&generation| generation < merged_generation)
-            .cloned()
-            .collect();
+        let stale_generations = read_generation(&self.path)?
+            .into_iter()
+            .filter(|&generation| generation < merged_generation);
         for generation in stale_generations {
-            self.readers.remove(&generation);
-            fs::remove_file(log_file_name(&self.path, generation))?;
+            let full_path_name = log_file_name(&self.path, generation);
+            if let Err(e) = fs::remove_file(&full_path_name) {
+                error!("Stale files delete failed: {:?}, {}", full_path_name, e);
+            }
         }
         self.unmerged = 0;
         Ok(())
@@ -227,18 +235,19 @@ impl KvStore {
         };
         let index = Arc::new(index);
         let writer = Arc::new(Mutex::new(KvStoreWriter {
+            path: path.clone(),
             write_generation,
             writer,
             unmerged,
-            reader,
-            index,
+            reader: reader.clone(),
+            index: index.clone(),
         }));
 
         Ok(KvStore {
             path,
-            index: index.clone(),
+            index,
             writer,
-            reader: reader.clone(),
+            reader,
         })
     }
 }
@@ -248,8 +257,8 @@ impl KvsEngine for KvStore {
     /// If the key does not exist, return None.
     /// Return an error if the value is not read successfully.
     fn get(&self, key: String) -> Result<Option<String>> {
-        if let Some(&cmd_info) = self.index.get(&key) {
-            if let Command::Set { value, .. } = self.reader.read(cmd_info) {
+        if let Some(entry) = self.index.get(&key) {
+            if let Command::Set { value, .. } = self.reader.read_command(entry.value().clone())? {
                 Ok(Some(value))
             } else {
                 Err(KvsError::UnknownCommand)
@@ -319,13 +328,14 @@ fn load_log(
         match cmd? {
             Command::Set { key, .. } => {
                 let info = CommandInfo::new(generation, start_pos, current_pos);
-                if let Some(old_cmd_info) = index.insert(key, info) {
-                    unmerged += old_cmd_info.length;
+                if let Some(entry) = index.get(&key) {
+                    unmerged += entry.value().length;
                 }
+                index.insert(key, info);
             }
             Command::Remove { key } => {
-                if let Some(old_cmd_info) = index.remove(&key) {
-                    unmerged += old_cmd_info.length;
+                if let Some(entry) = index.remove(&key) {
+                    unmerged += entry.value().length;
                 }
             }
         }
@@ -334,6 +344,7 @@ fn load_log(
     Ok(unmerged)
 }
 
+#[derive(Copy, Clone, Debug)]
 struct CommandInfo {
     generation: u64,
     pos_start: u64,
